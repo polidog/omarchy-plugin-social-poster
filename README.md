@@ -82,7 +82,6 @@ omarchy plugin update io.github.polidog.social-poster
 {
   "accounts": [
     {
-      "id": "bsky-main",
       "provider": "bluesky",
       "service": "https://bsky.social",
       "identifier": "polidog.bsky.social",
@@ -90,7 +89,6 @@ omarchy plugin update io.github.polidog.social-poster
       "enabled": true
     },
     {
-      "id": "misskey-io",
       "provider": "misskey",
       "host": "https://misskey.io",
       "token": "XXXXXXXX",
@@ -98,7 +96,6 @@ omarchy plugin update io.github.polidog.social-poster
       "enabled": true
     },
     {
-      "id": "mstdn",
       "provider": "mastodon",
       "host": "https://mastodon.social",
       "token": "YYYYYYYY",
@@ -106,11 +103,33 @@ omarchy plugin update io.github.polidog.social-poster
       "enabled": true
     }
   ],
-  "defaultPostTargets": ["bsky-main"],
+  "defaultPostTargets": ["bluesky"],
   "pollIntervalSeconds": 120,
   "notifications": true
 }
 ```
+
+#### アカウント ID は省略できます
+
+`id` はアカウントを指す名前(`defaultPostTargets` や state の保存キー)ですが、
+**省略すると `provider` 名がそのまま ID になります**。1 つの SNS に 1 アカウント
+なら書く必要はありません。
+
+同じ provider のアカウントを複数持つときだけ、両方に `id` を付けて区別します
+(片方を `"id": "misskey"` にしておけば、そのアカウントの既読状態は引き継がれます):
+
+```json
+{
+  "accounts": [
+    { "id": "misskey", "provider": "misskey", "host": "https://misskey.io", "token": "XXXX" },
+    { "id": "misskey-sub", "provider": "misskey", "host": "https://misskey.io", "token": "YYYY" }
+  ],
+  "defaultPostTargets": ["misskey"]
+}
+```
+
+`id` を省いたまま同じ provider を 2 つ書くと ID が衝突するため、2 つ目は設定
+エラーとしてパネルに表示されます。
 
 ### 秘密を直書きしたくない場合
 

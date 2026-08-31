@@ -14,7 +14,10 @@ function candidatePaths(configDir, pluginDir, providerName) {
 }
 
 function buildRequest(account, state, extra) {
-  var req = { contractVersion: CONTRACT_VERSION, account: account, state: state || {} }
+  // `__` で始まるキーはコア内部用(例: __implicitId)なのでプロバイダーには渡さない
+  var acc = {}
+  for (var key in account) if (key.indexOf("__") !== 0) acc[key] = account[key]
+  var req = { contractVersion: CONTRACT_VERSION, account: acc, state: state || {} }
   if (extra) for (var k in extra) req[k] = extra[k]
   return req
 }

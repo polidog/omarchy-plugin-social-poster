@@ -1,6 +1,8 @@
 // accounts.json の読み込み・検証(SPEC §5.1)
 // コアが解釈するのは id / provider / enabled のみ。残りはプロバイダー固有の
 // フィールドとしてそのまま account オブジェクトでプロバイダーに渡す。
+// id は省略可(省略時は provider 名が id になる)。パース結果の `__` で始まる
+// キーはコア内部用で、プロバイダーにも accounts.json にも出さない。
 .pragma library
 
 var MIN_POLL_SECONDS = 60
@@ -41,22 +43,31 @@ function parse(text) {
       out.errors.push({ message: "accounts[" + i + "] がオブジェクトではありません" })
       continue
     }
-    if (typeof a.id !== "string" || a.id === "") {
-      out.errors.push({ message: "accounts[" + i + "] に id がありません" })
-      continue
-    }
-    if (seen[a.id]) {
-      out.errors.push({ accountId: a.id, message: "id が重複しています: " + a.id })
-      continue
-    }
     if (typeof a.provider !== "string" || a.provider === "" || /[\/\0]/.test(a.provider)) {
-      out.errors.push({ accountId: a.id, message: "provider 名が不正です" })
+      out.errors.push({ message: "accounts[" + i + "] の provider 名が不正です" })
       continue
     }
-    seen[a.id] = true
+    if (a.id !== undefined && a.id !== null && typeof a.id !== "string") {
+      out.errors.push({ message: "accounts[" + i + "] の id は文字列で指定してください" })
+      continue
+    }
+    // id 省略時は provider 名をそのまま id にする。1 つの SNS に 1 アカウントなら
+    // これで一意になり、同じ provider を複数持つときだけ明示すればよい。
+    var id = typeof a.id === "string" ? a.id.trim() : ""
+    var implicitId = id === ""
+    if (implicitId) id = a.provider
+    if (seen[id]) {
+      out.errors.push({ accountId: id, message: implicitId
+        ? "provider \"" + a.provider + "\" のアカウントが複数あります。id を付けて区別してください"
+        : "id が重複しています: " + id })
+      continue
+    }
+    seen[id] = true
     var entry = {}
     for (var k in a) entry[k] = a[k]
+    entry.id = id
     entry.enabled = a.enabled !== false
+    if (implicitId) entry.__implicitId = true
     out.accounts.push(entry)
   }
 

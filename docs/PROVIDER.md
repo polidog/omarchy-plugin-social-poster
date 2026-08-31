@@ -47,6 +47,10 @@ Social Poster プラグインのコアは SNS を一切知りません。SNS ご
 `account` のうちコアが解釈するのは `id` / `provider` / `enabled` のみ。
 残りのフィールド(ホスト名・トークンなど)はプロバイダー固有です。
 
+`id` は accounts.json で省略でき、その場合はコアが `provider` 名を id として
+補います(プロバイダーには常に解決済みの `id` が入った状態で渡ります)。
+`__` 始まりのキーはコア内部用として予約されていて、リクエストには含まれません。
+
 ## レスポンス(全サブコマンド共通)
 
 ```json
@@ -129,8 +133,10 @@ esac
 対応する accounts.json のエントリ:
 
 ```json
-{ "id": "my-sns", "provider": "example", "token": "YYYYYYYY", "enabled": true }
+{ "provider": "example", "token": "YYYYYYYY", "enabled": true }
 ```
+
+(`id` を省いたので、このアカウントの id は `example` になります)
 
 ## 契約準拠の確認
 
