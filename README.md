@@ -1,82 +1,86 @@
 # Omarchy Social Poster
 
-Bluesky・Misskey・Mastodon などの SNS に、[Omarchy](https://omarchy.org/) デスクトップから
-ブラウザを開かずに **投稿**し、**メンションをバーで確認**するシェルプラグインです。
+*[日本語版 README](README.ja.md)*
 
-- テキスト投稿(複数アカウント対応、クロスポスト可、返信対応)
-- メンション・リプライの一覧表示と未読バッジ、新着のデスクトップ通知
-- SNS ごとの実装は**プロバイダー**(実行ファイル + JSON over stdio)に分離。
-  スクリプトを 1 つ置くだけで任意の SNS を後付けできます
+A shell plugin that lets you **post** to Bluesky, Misskey, Mastodon and other
+social networks — and **watch your mentions from the bar** — straight from the
+[Omarchy](https://omarchy.org/) desktop, without opening a browser.
+
+- Text posts (multiple accounts, cross-posting, replies)
+- A mention/reply list with an unread badge and desktop notifications for new items
+- Each network lives in a **provider** (an executable speaking JSON over stdio).
+  Drop in a single script and any network works — no core changes
   → [docs/PROVIDER.md](docs/PROVIDER.md)
 
-## 必要なもの
+## Requirements
 
-- Omarchy(シェルプラグイン機構のあるバージョン)
-- `curl` と `jq`(同梱プロバイダーが使用)
+- Omarchy (a version with the shell plugin system)
+- `curl` and `jq` (used by the bundled providers)
 
-## インストール
+## Install
 
 ```bash
 omarchy plugin add https://github.com/polidog/omarchy-plugin-social-poster
 ```
 
-有効化してバーの右セクションにウィジェットを追加します:
+Enable it and add the widget to the right section of the bar:
 
 ```bash
 omarchy plugin enable io.github.polidog.social-poster --section right
 ```
 
-## アンインストール
+## Uninstall
 
 ```bash
-# バーから外して無効化
+# Remove from the bar and disable
 omarchy plugin disable io.github.polidog.social-poster
 
-# プラグイン本体を削除
+# Remove the plugin itself
 omarchy plugin remove io.github.polidog.social-poster
 ```
 
-アカウント設定はプラグインを消しても残ります。認証情報ごと消すには手動で
-削除してください:
+Your account settings survive uninstalling the plugin. To delete them along
+with the credentials, remove the directory yourself:
 
 ```bash
 rm -rf ~/.config/omarchy/social-poster
 ```
 
-## 更新
+## Update
 
 ```bash
 omarchy plugin update io.github.polidog.social-poster
 ```
 
-## アカウント設定
+## Configuring accounts
 
-### セットアップ UI(推奨)
+### Setup UI (recommended)
 
-バーのアイコンを右クリック(またはクリック → 「セットアップを開く」)すると
-セットアップ画面が開きます。アカウント未設定のときは投稿画面の代わりに自動で
-表示されます。プロバイダーを選んで ID・認証情報を入力し、「接続テスト」で
-確認してから「保存」してください。既存アカウントの有効/無効・デフォルト
-投稿先・削除も同じ画面で管理できます。
+Right-click the bar icon (or click it and choose "Open setup") to open the
+setup screen. It also opens automatically in place of the composer while no
+account is configured. Pick a provider, fill in the ID and credentials, press
+"Test connection", then "Save". Enabling/disabling accounts, choosing default
+post targets and deleting accounts all happen on the same screen.
 
-設定は `~/.config/omarchy/social-poster/accounts.json` にパーミッション 600 で
-保存されます。
+Settings are stored in `~/.config/omarchy/social-poster/accounts.json` with
+permissions `600`.
 
-同梱プロバイダー:
+Bundled providers:
 
-- **bluesky**: `appPassword` には App Password(設定 → アプリパスワード)を使います
-- **misskey**: `token` は Web UI で発行した API トークン。必要権限は
-  `write:notes` / `read:notifications` / `write:notifications`。
-  Misskey フォーク(Firefish / Sharkey など)でも動く見込みです
-- **mastodon**: `token` は Web UI の「設定 → 開発 → 新規アプリ」で発行した
-  アクセストークン。必要スコープは `read:accounts` / `read:notifications` /
-  `write:statuses` / `write:accounts`(markers 更新用)。
-  Mastodon API 互換サーバー(Pleroma / Akkoma / GoToSocial など)でも使えます
+- **bluesky**: `appPassword` takes an App Password (Settings → App Passwords)
+- **misskey**: `token` is an API token issued from the web UI. Required
+  permissions: `write:notes` / `read:notifications` / `write:notifications`.
+  Misskey forks (Firefish, Sharkey, …) are expected to work too
+- **mastodon**: `token` is an access token from the web UI
+  (Preferences → Development → New application). Required scopes:
+  `read:accounts` / `read:notifications` / `write:statuses` /
+  `write:accounts` (for updating markers). Mastodon API-compatible servers
+  (Pleroma, Akkoma, GoToSocial, …) work as well
 
-### 手動で編集する場合
+### Editing the file by hand
 
-`accounts.json` は直接編集してもかまいません(**600 必須**。緩いと読み込みを
-拒否します。保存すると自動で再読み込みされます):
+You can edit `accounts.json` directly (**mode 600 is required** — anything
+looser is refused; saving triggers an automatic reload):
 
 ```json
 {
@@ -109,14 +113,15 @@ omarchy plugin update io.github.polidog.social-poster
 }
 ```
 
-#### アカウント ID は省略できます
+#### The account ID is optional
 
-`id` はアカウントを指す名前(`defaultPostTargets` や state の保存キー)ですが、
-**省略すると `provider` 名がそのまま ID になります**。1 つの SNS に 1 アカウント
-なら書く必要はありません。
+`id` is the name that refers to an account (in `defaultPostTargets` and as the
+state storage key), but **if you omit it the `provider` name becomes the ID**.
+With one account per network you never need to write it.
 
-同じ provider のアカウントを複数持つときだけ、両方に `id` を付けて区別します
-(片方を `"id": "misskey"` にしておけば、そのアカウントの既読状態は引き継がれます):
+Only give accounts an explicit `id` when you have several on the same provider
+(keep one of them as `"id": "misskey"` and that account's read state carries
+over):
 
 ```json
 {
@@ -128,81 +133,84 @@ omarchy plugin update io.github.polidog.social-poster
 }
 ```
 
-`id` を省いたまま同じ provider を 2 つ書くと ID が衝突するため、2 つ目は設定
-エラーとしてパネルに表示されます。
+Two accounts on the same provider with no `id` would collide, so the second one
+is reported in the panel as a configuration error.
 
-### 秘密を直書きしたくない場合
+### Keeping secrets out of the file
 
-任意のフィールドに `{"$command": "..."}` を書くと、コアがコマンドを実行して
-stdout の値に展開してからプロバイダーへ渡します(展開はメモリ上のみ):
+Write `{"$command": "..."}` in place of any field and the core runs the command
+and substitutes its stdout before handing the value to the provider (the
+expansion only ever exists in memory):
 
 ```json
 { "appPassword": { "$command": "secret-tool lookup service bsky" } }
 ```
 
-## 使い方
+## Usage
 
-| 操作 | 動作 |
+| Action | Result |
 |------|------|
-| バーのアイコンを左クリック | メンション一覧をトグル |
-| 中クリック | 手動リフレッシュ |
-| 右クリック | 投稿コンポーザーを開く |
-| 一覧の行をクリック | ブラウザで該当ポストを開く |
-| 行の「返信」 | 返信コンテキスト付きでコンポーザーを開く |
-| 行の 󰅖 | そのメンションを一覧から消す |
-| パネルの 󰄬 | すべて既読にする(行は残り、バッジだけ消える) |
-| パネルの 󰆴 | 一覧をすべて消す(併せて既読化) |
-| パネル・コンポーザーの 󰒓 | セットアップ画面(アカウント管理)を開く |
+| Left-click the bar icon | Toggle the mention list |
+| Middle-click | Refresh manually |
+| Right-click | Open the composer |
+| Click a row in the list | Open that post in the browser |
+| "Reply" on a row | Open the composer with the reply context attached |
+| 󰅖 on a row | Drop that mention from the list |
+| 󰄬 in the panel | Mark everything read (rows stay, only the badge clears) |
+| 󰆴 in the panel | Clear the whole list (marks everything read too) |
+| 󰒓 in the panel or composer | Open the setup screen (account management) |
 
-一覧は**開いただけでは既読になりません**。未読バッジを消すのは 󰄬 / 󰆴 の明示操作
-だけです。消したメンションは `state.json` に記録されるため、次のポーリングで同じ
-メンションが返ってきても一覧には戻りません。
+Opening the list **does not** mark anything read. Only the explicit 󰄬 / 󰆴
+actions clear the unread badge. Dismissed mentions are recorded in `state.json`,
+so they will not come back even if the next poll returns them again.
 
-コンポーザーでは投稿先アカウントをチェックボックスで選び(複数選択で
-クロスポスト)、`Ctrl+Enter` で送信、`Esc` でキャンセルです。
+In the composer, pick the target accounts with the checkboxes (select several to
+cross-post), send with `Ctrl+Enter` and cancel with `Esc`.
 
-コンポーザー・セットアップ画面は**ノンモーダル**です。開いている間もカードの外側は
-背後のウィンドウがそのまま操作でき、Hyprland のキーバインドも効きます(トークンを
-ブラウザやパスワードマネージャーからコピーしてくる、といった行き来ができます)。
-カードをクリックすれば入力に戻ります。閉じるのは `Esc` かヘッダーの 󰅖 です。
+The composer and the setup screen are **non-modal**. While they are open, the
+window behind them stays usable outside the card and Hyprland keybindings keep
+working — so you can go fetch a token from a browser or password manager and
+come back. Click the card to return to the input. Close with `Esc` or the 󰅖 in
+the header.
 
-### キーバインドで投稿画面を開く
+### Opening the composer with a keybinding
 
-`~/.config/hypr/bindings.lua` に追加します:
+Add this to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER SHIFT, P", "exec", "omarchy-shell shell summon io.github.polidog.social-poster")
 ```
 
-## 独自 SNS の追加
+## Adding your own network
 
-`~/.config/omarchy/social-poster/providers/<name>` に契約
-([docs/PROVIDER.md](docs/PROVIDER.md))に従う実行ファイルを置き、
-accounts.json のエントリで `"provider": "<name>"` を指定するだけです。
-コアの変更・再インストールは不要です。準拠確認には
-`tools/provider-check` が使えます。
+Put an executable that follows the contract
+([docs/PROVIDER.md](docs/PROVIDER.md)) at
+`~/.config/omarchy/social-poster/providers/<name>` and reference it from an
+accounts.json entry with `"provider": "<name>"`. That is all — no core changes,
+no reinstall. `tools/provider-check` verifies that a provider conforms.
 
-## セキュリティ
+## Security
 
-- トークン類は argv・環境変数・ログ・通知に出しません(プロバイダーへは stdin の JSON で渡します)
-- `accounts.json` / `state.json` は 600 で作成・検査します
-- 同梱プロバイダーは `--proto '=https'` で https を強制します
-- プロバイダーの stderr 診断ログはメモリ内のみで、ファイルには書きません
+- Tokens never appear in argv, environment variables, logs or notifications
+  (they reach providers as JSON on stdin)
+- `accounts.json` and `state.json` are created and checked with mode 600
+- The bundled providers force https with `--proto '=https'`
+- Provider stderr diagnostics stay in memory and are never written to disk
 
-## トラブルシューティング
+## Troubleshooting
 
 ```bash
-# サービスの状態を確認
+# Check the service status
 omarchy-shell social-poster status
 
-# 手動リフレッシュ
+# Refresh manually
 omarchy-shell social-poster refresh
 ```
 
-バーのアイコンに 󰀪 が出ているときは、ツールチップかメンション一覧の上部に
-エラー内容が表示されます。認証エラーのアカウントは accounts.json を修正して
-保存すると自動で再開します。
+When 󰀪 shows up on the bar icon, the details are in the tooltip or at the top
+of the mention list. An account that failed to authenticate resumes
+automatically once you fix and save accounts.json.
 
-## ライセンス
+## License
 
 MIT

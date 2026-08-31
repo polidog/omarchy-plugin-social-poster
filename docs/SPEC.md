@@ -52,9 +52,10 @@ QML から任意のユーザー JS を動的ロードするのは Quickshell 上
 ```
 io.github.polidog.social-poster/
 ├── manifest.json
-├── README.md
+├── README.md              # 英語(公開の入口)
+├── README.ja.md           # 日本語
 ├── docs/
-│   └── PROVIDER.md        # プロバイダー契約の公開ドキュメント(利用者向け)
+│   └── PROVIDER.md        # プロバイダー契約の公開ドキュメント(利用者向け・英語)
 ├── providers/             # 同梱プロバイダー(契約 §4 に従う実行ファイル)
 │   ├── bluesky            # bash + curl + jq
 │   └── misskey            # bash + curl + jq

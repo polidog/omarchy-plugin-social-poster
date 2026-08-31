@@ -1,115 +1,122 @@
-# プロバイダー契約 v1(Provider Contract v1)
+# Provider Contract v1
 
-Social Poster プラグインのコアは SNS を一切知りません。SNS ごとの実装は
-**プロバイダー**という独立した実行ファイルに分離されていて、スクリプトを
-1 つ置くだけで任意の SNS を追加できます。
+The Social Poster core knows nothing about any social network. Each network is
+implemented in a **provider** — a standalone executable — so adding a network is
+a matter of dropping in one script.
 
-> ⚠️ **プロバイダーを置くこと = そのコードにアカウントのトークンを渡すこと**です。
-> 自分で書いたか、中身を読んで信頼できると判断したものだけを配置してください。
-> コアがプロバイダーを勝手にダウンロードすることはありません。
+> ⚠️ **Installing a provider means handing your account tokens to that code.**
+> Only install providers you wrote yourself, or whose source you have read and
+> decided to trust. The core never downloads a provider on its own.
 
-## 配置場所と探索順
+## Location and lookup order
 
-`accounts.json` の各アカウントが持つ `provider` 名を、次の順で実行ファイルに
-解決します(先勝ち。同名を置けば同梱実装を差し替えられます):
+The `provider` name on each account in `accounts.json` is resolved to an
+executable in this order (first match wins, so dropping in a file with the same
+name overrides a bundled implementation):
 
-1. `~/.config/omarchy/social-poster/providers/<name>`(利用者追加・上書き用)
-2. `<プラグインディレクトリ>/providers/<name>`(同梱: bluesky / misskey / mastodon)
+1. `~/.config/omarchy/social-poster/providers/<name>` (user-installed, overrides)
+2. `<plugin directory>/providers/<name>` (bundled: bluesky / misskey / mastodon)
 
-実行権限(`chmod +x`)がない・見つからない場合、そのアカウントは設定エラーに
-なりパネルに表示されます。
+If the file is missing or not executable (`chmod +x`), that account becomes a
+configuration error and is reported in the panel.
 
-## 呼び出し形式
+## Invocation
 
 ```
 <provider> <subcommand>
 ```
 
-- **stdin**: JSON リクエスト(秘密情報は必ずここで渡される。argv・環境変数には載らない)
-- **stdout**: JSON レスポンス(1 オブジェクト)
-- **stderr**: 診断ログ。コアがメモリ内リングバッファに保持する(ファイルには書かれない)
-- タイムアウト: コア側で 30 秒。超えるとエラー扱い
+- **stdin**: the JSON request (secrets always arrive here, never in argv or the environment)
+- **stdout**: the JSON response (a single object)
+- **stderr**: diagnostics; the core keeps them in an in-memory ring buffer (never written to disk)
+- Timeout: 30 seconds, enforced by the core. Exceeding it is treated as an error
 
-言語は自由です(同梱は bash + curl + jq)。プロバイダーは**ステートレス**に
-書きます。セッションキャッシュ等が必要なら `state` として JSON を返せば、
-コアが永続化して次回呼び出し時にそのまま渡します。
+Any language will do (the bundled ones are bash + curl + jq). Write providers as
+**stateless**. If you need something like a session cache, return it as `state`
+JSON and the core will persist it and hand it back on the next call.
 
-## リクエスト(全サブコマンド共通)
+## Request (common to every subcommand)
 
 ```json
 {
   "contractVersion": 1,
-  "account": { "...accounts.json の該当エントリがそのまま入る..." },
-  "state": { "...前回プロバイダーが返した state。初回は {}..." }
+  "account": { "...the matching accounts.json entry, verbatim..." },
+  "state": { "...the state your provider returned last time; {} on the first call..." }
 }
 ```
 
-`account` のうちコアが解釈するのは `id` / `provider` / `enabled` のみ。
-残りのフィールド(ホスト名・トークンなど)はプロバイダー固有です。
+Of `account`, the core only interprets `id` / `provider` / `enabled`. The
+remaining fields (host names, tokens, …) are provider-specific.
 
-`id` は accounts.json で省略でき、その場合はコアが `provider` 名を id として
-補います(プロバイダーには常に解決済みの `id` が入った状態で渡ります)。
-`__` 始まりのキーはコア内部用として予約されていて、リクエストには含まれません。
+`id` may be omitted in accounts.json, in which case the core fills in the
+`provider` name as the id — providers always receive an `id` that is already
+resolved. Keys starting with `__` are reserved for core internals and are never
+included in the request.
 
-## レスポンス(全サブコマンド共通)
+## Response (common to every subcommand)
 
 ```json
 {
   "ok": true,
-  "state": { "...次回渡してほしい state(省略時は前回値を維持)..." },
-  "error": { "code": "auth|network|invalid|other", "message": "人間向け説明" }
+  "state": { "...state to hand back next time (omit to keep the previous value)..." },
+  "error": { "code": "auth|network|invalid|other", "message": "human-readable explanation" }
 }
 ```
 
-- `ok: false` のとき `error` は必須
-- `error.code: "auth"` はコアが「再設定が必要」通知とアカウント一時停止に使う
-- `error.code: "network"` は指数バックオフによる自動リトライになる(通知なし)
+- `error` is required when `ok` is `false`
+- `error.code: "auth"` makes the core notify the user that reconfiguration is
+  needed and suspend the account
+- `error.code: "network"` triggers an automatic retry with exponential backoff
+  (no notification)
 
-## サブコマンド一覧
+## Subcommands
 
-| サブコマンド | 追加リクエストフィールド | 追加レスポンスフィールド | 必須 |
+| Subcommand | Extra request fields | Extra response fields | Required |
 |---|---|---|---|
-| `info` | なし | `name`, `maxChars`(null 可), `capabilities: ["post", "mentions", "markRead"]` | ✔ |
-| `verify` | なし | なし(認証確認のみ。`ok` で判定) | ✔ |
-| `post` | `text`, `replyTo`(null 可) | `url`(投稿の permalink、null 可) | ✔ |
-| `mentions` | `cursor`(前回レスポンスの値、初回 null) | `mentions: [...]`, `cursor` | ✔ |
-| `markRead` | `until`(ISO 8601 時刻) | なし | 任意 |
+| `info` | none | `name`, `maxChars` (nullable), `capabilities: ["post", "mentions", "markRead"]` | ✔ |
+| `verify` | none | none (authentication check only; judged by `ok`) | ✔ |
+| `post` | `text`, `replyTo` (nullable) | `url` (permalink of the post, nullable) | ✔ |
+| `mentions` | `cursor` (the value from your last response; null on the first call) | `mentions: [...]`, `cursor` | ✔ |
+| `markRead` | `until` (ISO 8601 timestamp) | none | optional |
 
-- `info` は起動時とアカウント設定変更時に呼ばれ、文字数上限・対応機能をコアが
-  把握します。`capabilities` に無い操作は UI から隠されます(投稿専用・閲覧専用の
-  プロバイダーも作れます)
-- `maxChars` がアカウント設定依存(Misskey のインスタンス上限など)の場合は
-  `info` の応答で動的に返してください
-- `markRead` 非対応の場合、コアはローカル既読(最終閲覧時刻)のみで処理します
-- `cursor` の意味論はプロバイダー任せです。使わないなら `null` を返して
-  かまいません(コアはメンション ID で重複を排除します)
+- `info` is called at startup and whenever account settings change, so the core
+  learns the character limit and the supported features. Actions missing from
+  `capabilities` are hidden in the UI (post-only and read-only providers are
+  both fine)
+- If `maxChars` depends on the account (an instance limit on Misskey, say),
+  return it dynamically from `info`
+- Without `markRead`, the core falls back to local read tracking (last viewed
+  timestamp) only
+- The semantics of `cursor` are entirely up to you. Return `null` if you do not
+  need one — the core deduplicates mentions by ID
 
-## Mention 型(`mentions` の要素)
+## The Mention type (elements of `mentions`)
 
 ```json
 {
-  "id": "プロバイダー内で一意な文字列",
+  "id": "a string unique within this provider",
   "author": { "handle": "@polidog", "displayName": "polidog", "avatarUrl": null },
-  "text": "本文(プレーンテキスト)",
+  "text": "the body, as plain text",
   "createdAt": "2026-08-31T12:34:56Z",
-  "url": "ブラウザで開く permalink",
-  "replyContext": { "...そのまま post の replyTo に渡せる不透明オブジェクト..." }
+  "url": "permalink to open in the browser",
+  "replyContext": { "...an opaque object that can be passed straight to post's replyTo..." }
 }
 ```
 
-`replyContext` は**コアが中身を解釈しない不透明値**です。ユーザーが返信すると
-`post` の `replyTo` にそのまま渡ってきます(Bluesky なら `{uri, cid, rootUri,
-rootCid}`、Misskey なら `{noteId}` ですが、コアは知りません)。返信の仕組みが
-SNS ごとに違ってもコアの変更は不要です。
+`replyContext` is an **opaque value the core never interprets**. When the user
+replies, it comes back to `post` as `replyTo` exactly as you produced it (for
+Bluesky it holds `{uri, cid, rootUri, rootCid}`, for Misskey `{noteId}` — the
+core knows neither). Networks can thread replies however they like without any
+core changes.
 
-## セキュリティ上の約束事
+## Security obligations
 
-- トークン類を **argv・環境変数・ログに出さない**こと。外部コマンド(curl 等)に
-  渡すときも stdin 経由(`-H @-` や `--data @-`)を使う
-- 通信は https を強制する(curl なら `--proto '=https'`)
-- 一時ファイルに秘密を書かない
+- **Keep tokens out of argv, the environment and logs.** Pass them to external
+  commands (curl and friends) over stdin too (`-H @-`, `--data @-`)
+- Force https (`--proto '=https'` with curl)
+- Never write secrets to temporary files
 
-## 最小のプロバイダー例
+## A minimal provider
 
 ```bash
 #!/usr/bin/env bash
@@ -130,22 +137,22 @@ case "${1:?subcommand required}" in
 esac
 ```
 
-対応する accounts.json のエントリ:
+The matching accounts.json entry:
 
 ```json
 { "provider": "example", "token": "YYYYYYYY", "enabled": true }
 ```
 
-(`id` を省いたので、このアカウントの id は `example` になります)
+(Since `id` is omitted, this account's id is `example`.)
 
-## 契約準拠の確認
+## Checking conformance
 
-同梱のチェックスクリプトで最低限の準拠を確認できます:
+The bundled check script verifies the basics of the contract:
 
 ```bash
 tools/provider-check ~/.config/omarchy/social-poster/providers/example
 
-# 実アカウントで verify / mentions まで確認する場合
-# (account.json には accounts.json の 1 エントリ分を入れる。post は実行されない)
+# To go as far as verify / mentions against a real account
+# (account.json holds one accounts.json entry; post is never executed)
 tools/provider-check ./providers/bluesky --account /tmp/account.json
 ```
