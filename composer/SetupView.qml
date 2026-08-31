@@ -74,11 +74,10 @@ Column {
   // 入力からアカウントエントリを組み立てる。不備があれば null + メッセージ。
   function buildEntry() {
     var id = idField.text.trim()
-    if (id === "") {
-      setMessage("アカウント ID を入力してください(例: " + providerName + "-main)", true)
-      return null
-    }
-    var entry = { id: id, provider: providerName, enabled: true }
+    // ID は省略可。省略時は provider 名がそのまま ID になる(同じ SNS で
+    // 複数アカウントを使うときだけ入力してもらう)
+    var entry = { id: id === "" ? providerName : id, provider: providerName, enabled: true }
+    if (id === "") entry.__implicitId = true
     if (template) {
       for (var i = 0; i < template.length; i++) {
         var f = template[i]
@@ -118,6 +117,10 @@ Column {
     var exists = false
     for (var i = 0; i < accounts.length; i++)
       if (accounts[i].id === entry.id) exists = true
+    if (exists && entry.__implicitId === true) {
+      setMessage("「" + providerName + "」のアカウントが既にあります。区別するためにアカウント ID を入力するか、既存の行を削除してください", true)
+      return
+    }
     busy = true
     setMessage(exists ? "既存の「" + entry.id + "」を上書きしています…" : "保存しています…", false)
     service.upsertAccount(entry, makeDefault, function(ok, err) {
@@ -187,7 +190,9 @@ Column {
 
           Text {
             width: parent.width
-            text: accountRow.modelData.id + " · " + accountRow.modelData.provider
+            text: (accountRow.modelData.__implicitId === true
+                   ? accountRow.modelData.provider
+                   : accountRow.modelData.id + " · " + accountRow.modelData.provider)
               + (accountRow.isDefault ? " ★" : "")
             color: root.foreground
             font.family: root.fontFamily
@@ -275,7 +280,7 @@ Column {
   TextField {
     id: idField
     width: parent.width
-    placeholderText: "アカウント ID(例: " + root.providerName + "-main)"
+    placeholderText: "アカウント ID(省略可 · 既定は「" + root.providerName + "」)"
     foreground: root.foreground
     enabled: !root.busy
   }

@@ -229,7 +229,6 @@ esac
 {
   "accounts": [
     {
-      "id": "bsky-main",
       "provider": "bluesky",
       "service": "https://bsky.social",
       "identifier": "polidog.bsky.social",
@@ -245,19 +244,28 @@ esac
       "enabled": true
     },
     {
-      "id": "my-sns",
+      "id": "misskey-sub",
+      "provider": "misskey",
+      "host": "https://misskey.io",
+      "token": "ZZZZZZZZ",
+      "enabled": true
+    },
+    {
       "provider": "example",
       "token": "YYYYYYYY",
       "enabled": true
     }
   ],
-  "defaultPostTargets": ["bsky-main"],
+  "defaultPostTargets": ["bluesky"],
   "pollIntervalSeconds": 120,
   "notifications": true
 }
 ```
 
 - コアが解釈するのは `id` / `provider` / `enabled` のみ。**残りのフィールドはプロバイダー固有**で、そのまま `account` としてプロバイダーに渡る(プロバイダー追加時に accounts.json のスキーマ変更が不要)
+- `id` は**省略可**。省略時は `provider` 名がそのまま id になる(1 SNS 1 アカウントという通常のケースでは書かなくてよい)。同じ `provider` のアカウントを複数持つときだけ、両方に id を付けて区別する。省略のまま衝突した 2 つ目は設定エラーとして扱い、一覧に警告を出す
+- id はアカウントの安定キー(state.json のキー、`defaultPostTargets` の参照先)なので、後から id を付け替えると既読・削除済みの記録はリセットされる。省略していたアカウントに後から id を付けるときは `provider` と同じ値にすれば引き継がれる
+- コアは UI とファイル書き戻しの内部フラグに `__` 始まりのキー(`__implicitId` など)を使う。これはプロバイダーにも accounts.json にも出さない。ユーザー・プロバイダーは `__` 始まりのフィールド名を使わないこと
 - ファイルは **パーミッション 600 必須**。サービス起動時に検査し、緩い場合は警告通知を出して読み込みを拒否する
 - 秘密の直書きを避けたい利用者向けに、任意のフィールドで `{"$command": "secret-tool lookup service bsky"}` 形式を許容する。コアが実行して stdout の値に展開してからプロバイダーへ渡す(展開はメモリ上のみ)
 

@@ -563,7 +563,14 @@ Item {
 
   // 秘密を含むため JSON は stdin 経由で渡し、600 のまま原子的に置き換える
   function writeAccountsConfig(config, cb) {
-    var json = JSON.stringify(config, null, 2) + "\n"
+    // 省略された id は省略のまま、コア内部用の `__` キーは落として書き戻す
+    var cfg = JSON.parse(JSON.stringify(config))
+    for (var i = 0; i < cfg.accounts.length; i++) {
+      var a = cfg.accounts[i]
+      if (a.__implicitId === true) delete a.id
+      for (var k in a) if (k.indexOf("__") === 0) delete a[k]
+    }
+    var json = JSON.stringify(cfg, null, 2) + "\n"
     enqueueJob(["bash", "-c",
       'umask 077; tmp="$1.tmp.$$"; cat > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$1"',
       "write-accounts", root.accountsPath], json, 10000, function(r) {
@@ -652,9 +659,10 @@ Item {
       var st = accountStatus[a.id]
       if (!Providers.hasCapability(info, "post")) continue
       if (st && (st.state === "auth" || st.state === "config" || st.state === "paused")) continue
+      var providerLabel = info ? info.name : a.provider
       posts.push({
         id: a.id,
-        label: (info ? info.name : a.provider) + " · " + a.id,
+        label: a.__implicitId === true ? providerLabel : providerLabel + " · " + a.id,
         maxChars: info ? info.maxChars : null
       })
     }
