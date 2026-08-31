@@ -464,7 +464,10 @@ Item {
     }
   }
 
-  // ============================================================ 既読処理
+  // ====================================================== 既読・非表示処理
+
+  // 「見たら消える」自動既読はしない(SPEC §6.2)。既読化・削除は
+  // すべてパネルの明示操作からのみ行われる。
 
   function markAllRead() {
     var now = new Date().toISOString()
@@ -487,6 +490,30 @@ Item {
       schedulePersist()
       updateDerived()
     }
+  }
+
+  // 個別メンションを一覧から消す。消した ID は state.json に残るので
+  // 再ポーリングで同じメンションが返ってきても復活しない。
+  function dismissMention(accountId, mentionId) {
+    if (!accountId || !mentionId) return
+    Store.rememberDismissed(Store.accountRecord(persist, accountId), [mentionId])
+    schedulePersist()
+    updateDerived()
+  }
+
+  // 表示中のメンションをすべて消す(併せて既読化する)。
+  function dismissAll() {
+    var idsByAccount = {}
+    for (var i = 0; i < mentions.length; i++) {
+      var m = mentions[i]
+      if (!idsByAccount[m.accountId]) idsByAccount[m.accountId] = []
+      idsByAccount[m.accountId].push(m.id)
+    }
+    for (var id in idsByAccount)
+      Store.rememberDismissed(Store.accountRecord(persist, id), idsByAccount[id])
+    markAllRead()
+    schedulePersist()
+    updateDerived()
   }
 
   // ================================================================ 投稿
@@ -605,7 +632,9 @@ Item {
   // ============================================================ 集約値更新
 
   function updateDerived() {
-    var merged = Store.mergeMentions(mentionsByAccount)
+    var merged = Store.mergeMentions(mentionsByAccount, function(accountId, mentionId) {
+      return Store.accountRecord(root.persist, accountId).dismissedIds.indexOf(mentionId) !== -1
+    })
     var unread = 0
     for (var i = 0; i < merged.length; i++) {
       var rec = Store.accountRecord(persist, merged[i].accountId)

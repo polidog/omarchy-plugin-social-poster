@@ -6,6 +6,7 @@ import qs.Ui
 // バーのピル: アイコン + 未読バッジ(SPEC §6.2)。
 // 左クリック: メンション一覧をトグル / 中クリック: 手動リフレッシュ /
 // 右クリック: コンポーザー召喚。
+// 一覧を開いただけでは既読にならない。既読化・削除はパネル内の明示操作のみ。
 BarWidget {
   id: root
   moduleName: "io.github.polidog.social-poster"
@@ -120,10 +121,5 @@ BarWidget {
     owner: root
     open: root.popupOpen
     svc: root.svc
-
-    // パネルを閉じたタイミングで既読化(SPEC §6.2)
-    onOpenChanged: {
-      if (!open && root.svc && root.svc.unreadCount > 0) root.svc.markAllRead()
-    }
   }
 }

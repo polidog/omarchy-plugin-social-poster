@@ -47,7 +47,6 @@ Item {
   readonly property color foreground: Color.menu.text
   readonly property color borderColor: Color.menu.border
   readonly property var borderSpec: Border.surfaceSpec("menu", "border", borderColor, Math.max(1, Style.space(2)))
-  readonly property color scrim: Color.menu.scrim
   readonly property int cornerRadius: Style.cornerRadius
   readonly property string fontFamily: Style.font.menuFamily
   readonly property int contentMargin: Style.spacing.panelPadding
@@ -159,21 +158,45 @@ Item {
   PanelWindow {
     id: panel
     visible: root.opened
+    // サーフェスは全画面のまま(カードの中央寄せを素直に書けるため)だが、
+    // ポインタ入力は下の mask でカードの矩形だけに絞る。オーバーレイを
+    // 開いたままブラウザや端末をクリックできる = ノンモーダル。
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     WlrLayershell.namespace: "omarchy-social-poster"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
-    Rectangle {
-      anchors.fill: parent
-      color: root.scrim
+    // キーボードは掴みっぱなしにしない。マップ直後だけ Exclusive にして
+    // 確実にフォーカスを取り(ポインタを掴んだアプリの上でも開けるように)、
+    // すぐ OnDemand へ落として Hyprland のキーバインドと他ウィンドウへの
+    // フォーカス移動を解放する。カードをクリックすれば入力へ戻れる。
+    property bool focusPrimed: false
+    WlrLayershell.keyboardFocus: root.opened
+      ? (focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+      : WlrKeyboardFocus.None
+
+    onBackingWindowVisibleChanged: {
+      focusPrimed = false
+      if (root.opened && backingWindowVisible) focusPrimeTimer.restart()
     }
 
-    MouseArea {
-      anchors.fill: parent
-      onClicked: root.dismiss()
+    Timer {
+      id: focusPrimeTimer
+      // Qt/Wayland の commit を数回またぐだけの長さ。Exclusive でいる時間を
+      // 体感できないほど短く保つ。
+      interval: 75
+      onTriggered: if (root.opened) panel.focusPrimed = true
+    }
+
+    // クリックを受けるのはカードの矩形だけで、外側はクリックスルー。
+    // よって「外側クリックで閉じる」は無くなり、閉じるのは Esc / 󰅖 /
+    // 投稿完了時のみ。
+    // (contentColumn を足しているのは、内容がカード高さを超えて描画された
+    // ときにその部分が入力を受け取れなくなるのを防ぐため)
+    mask: Region {
+      item: card
+      Region { item: contentColumn }
     }
 
     BorderSurface {
@@ -186,8 +209,6 @@ Item {
       color: root.background
       borderSpec: root.borderSpec
       padding: root.contentMargin
-
-      MouseArea { anchors.fill: parent; onClicked: {} }
 
       Column {
         id: contentColumn
