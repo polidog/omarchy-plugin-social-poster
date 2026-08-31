@@ -159,6 +159,8 @@ expansion only ever exists in memory):
 | 󰄬 in the panel | Mark everything read (rows stay, only the badge clears) |
 | 󰆴 in the panel | Clear the whole list (marks everything read too) |
 | 󰒓 in the panel or composer | Open the setup screen (account management) |
+| 󰤌 in the panel or the setup screen | Start a new post |
+| 󰌌 in the composer | Hand the keyboard back to the other windows (`Ctrl+Esc`) |
 
 Opening the list **does not** mark anything read. Only the explicit 󰄬 / 󰆴
 actions clear the unread badge. Dismissed mentions are recorded in `state.json`,
@@ -167,11 +169,16 @@ so they will not come back even if the next poll returns them again.
 In the composer, pick the target accounts with the checkboxes (select several to
 cross-post), send with `Ctrl+Enter` and cancel with `Esc`.
 
-The composer and the setup screen are **non-modal**. While they are open, the
-window behind them stays usable outside the card and Hyprland keybindings keep
-working — so you can go fetch a token from a browser or password manager and
-come back. Click the card to return to the input. Close with `Esc` or the 󰅖 in
-the header.
+The composer and the setup screen are **non-modal**: the window behind them
+stays usable outside the card, since only the card rectangle accepts clicks.
+The keyboard, however, is held while the overlay is open — Hyprland does not
+hand keyboard focus to an `on_demand` layer surface at map time, so an overlay
+that wants to be typable the moment it opens has to grab it.
+
+Press `Ctrl+Esc` (or the 󰌌 in the header) to hand the keyboard back to the
+other windows — Hyprland keybindings and the app behind the card become usable
+again, so you can go fetch a token from a browser or password manager. Click
+the card to take the keyboard back. Close with `Esc` or the 󰅖 in the header.
 
 ### Opening the composer with a keybinding
 
@@ -210,6 +217,25 @@ omarchy-shell social-poster refresh
 When 󰀪 shows up on the bar icon, the details are in the tooltip or at the top
 of the mention list. An account that failed to authenticate resumes
 automatically once you fix and save accounts.json.
+
+### An input method (fcitx5 / ibus) does not reach the composer
+
+If your IME is dead in the composer — keystrokes vanish, no preedit, no
+candidate window — the cause is `QT_IM_MODULE`, not this plugin. Omarchy ships
+`QT_IM_MODULE=fcitx` (`/usr/share/omarchy/default/environment.d/10-omarchy-fcitx.conf`),
+which routes Qt through the fcitx D-Bus input context instead of the Wayland
+`text-input-v3` protocol. Quickshell layer surfaces get no input context that
+way, so every Quickshell overlay is affected, not just this one.
+
+Override it for your user and log back in:
+
+```bash
+# environment.d cannot unset a variable, so override it with an empty value
+printf 'QT_IM_MODULE=\n' > ~/.config/environment.d/95-qt-im-wayland.conf
+```
+
+Qt then falls back to `text-input-v3`, which fcitx5 and ibus both speak. Delete
+the file and log back in to revert.
 
 ## License
 
