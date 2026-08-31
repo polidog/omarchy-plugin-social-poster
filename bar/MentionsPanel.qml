@@ -6,6 +6,7 @@ import qs.Ui
 // メンション一覧ポップアップ(SPEC §6.2)。
 // サービス保持の統合一覧を表示するだけで、データは一切持たない。
 // 行クリックでブラウザ、返信ボタンで返信コンテキスト付きコンポーザー召喚。
+// 開いただけでは既読にならず、既読化・削除はヘッダー/行の明示操作で行う。
 PopupCard {
   id: root
 
@@ -65,6 +66,22 @@ PopupCard {
           foreground: root.bar.foreground
           iconSpinning: root.svc ? root.svc.refreshing : false
           onClicked: if (root.svc) root.svc.refreshNow()
+        }
+
+        Button {
+          iconText: "󰄬"
+          tooltipText: "すべて既読にする"
+          foreground: root.bar.foreground
+          visible: root.svc ? root.svc.unreadCount > 0 : false
+          onClicked: if (root.svc) root.svc.markAllRead()
+        }
+
+        Button {
+          iconText: "󰆴"
+          tooltipText: "一覧をすべて消す"
+          foreground: root.bar.foreground
+          visible: root.rows.length > 0
+          onClicked: if (root.svc) root.svc.dismissAll()
         }
 
         Button {
@@ -194,12 +211,12 @@ PopupCard {
 
                 Item {
                   width: parent.width
-                  height: metaText.implicitHeight
+                  height: Math.max(metaText.implicitHeight, rowActions.implicitHeight)
 
                   Text {
                     id: metaText
                     anchors.left: parent.left
-                    anchors.right: replyButton.left
+                    anchors.right: rowActions.left
                     anchors.rightMargin: Style.space(6)
                     text: (row.unread ? "● " : "")
                       + (row.modelData.author.displayName || row.modelData.author.handle)
@@ -212,24 +229,38 @@ PopupCard {
                     elide: Text.ElideRight
                   }
 
-                  Button {
-                    id: replyButton
+                  Row {
+                    id: rowActions
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "返信"
-                    fontSize: Style.font.caption
-                    foreground: root.bar.foreground
-                    horizontalPadding: Style.space(6)
-                    verticalPadding: Style.space(1)
-                    visible: row.modelData.replyContext !== null
-                    onClicked: root.summonComposer({
-                      replyTo: {
-                        accountId: row.modelData.accountId,
-                        replyContext: row.modelData.replyContext,
-                        authorHandle: row.modelData.author.handle,
-                        excerpt: row.modelData.text
-                      }
-                    })
+                    spacing: Style.space(2)
+
+                    Button {
+                      text: "返信"
+                      fontSize: Style.font.caption
+                      foreground: root.bar.foreground
+                      horizontalPadding: Style.space(6)
+                      verticalPadding: Style.space(1)
+                      visible: row.modelData.replyContext !== null
+                      onClicked: root.summonComposer({
+                        replyTo: {
+                          accountId: row.modelData.accountId,
+                          replyContext: row.modelData.replyContext,
+                          authorHandle: row.modelData.author.handle,
+                          excerpt: row.modelData.text
+                        }
+                      })
+                    }
+
+                    Button {
+                      iconText: "󰅖"
+                      iconSize: Style.font.caption
+                      tooltipText: "このメンションを消す"
+                      foreground: root.bar.foreground
+                      horizontalPadding: Style.space(6)
+                      verticalPadding: Style.space(1)
+                      onClicked: if (root.svc) root.svc.dismissMention(row.modelData.accountId, row.modelData.id)
+                    }
                   }
                 }
 

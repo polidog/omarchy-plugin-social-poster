@@ -3,6 +3,7 @@
 .pragma library
 
 var MAX_NOTIFIED_IDS = 200
+var MAX_DISMISSED_IDS = 200
 var MAX_MENTIONS = 50
 
 function emptyState() {
@@ -23,14 +24,16 @@ function parseState(text) {
 //   cursor:        mentions の前回カーソル
 //   lastReadAt:    ローカル既読時刻(ISO 8601)
 //   notifiedIds:   通知済みメンション ID(重複通知防止)
+//   dismissedIds:  利用者が明示的に消したメンション ID(再ポーリングでも復活させない)
 function accountRecord(state, accountId) {
   var rec = state.accounts[accountId]
   if (!rec || typeof rec !== "object") {
-    rec = { providerState: {}, cursor: null, lastReadAt: null, notifiedIds: [] }
+    rec = { providerState: {}, cursor: null, lastReadAt: null, notifiedIds: [], dismissedIds: [] }
     state.accounts[accountId] = rec
   }
   if (!rec.providerState || typeof rec.providerState !== "object") rec.providerState = {}
   if (!Array.isArray(rec.notifiedIds)) rec.notifiedIds = []
+  if (!Array.isArray(rec.dismissedIds)) rec.dismissedIds = []
   return rec
 }
 
@@ -42,12 +45,24 @@ function rememberNotified(rec, ids) {
     rec.notifiedIds = rec.notifiedIds.slice(rec.notifiedIds.length - MAX_NOTIFIED_IDS)
 }
 
-// 全アカウント統合の時系列一覧(新しい順、最大 MAX_MENTIONS 件)
-function mergeMentions(mentionsByAccount) {
+function rememberDismissed(rec, ids) {
+  for (var i = 0; i < ids.length; i++) {
+    if (rec.dismissedIds.indexOf(ids[i]) === -1) rec.dismissedIds.push(ids[i])
+  }
+  if (rec.dismissedIds.length > MAX_DISMISSED_IDS)
+    rec.dismissedIds = rec.dismissedIds.slice(rec.dismissedIds.length - MAX_DISMISSED_IDS)
+}
+
+// 全アカウント統合の時系列一覧(新しい順、最大 MAX_MENTIONS 件)。
+// isDismissed(accountId, mentionId) が真を返すものは一覧から除外する。
+function mergeMentions(mentionsByAccount, isDismissed) {
   var all = []
   for (var id in mentionsByAccount) {
     var list = mentionsByAccount[id] || []
-    for (var i = 0; i < list.length; i++) all.push(list[i])
+    for (var i = 0; i < list.length; i++) {
+      if (isDismissed && isDismissed(id, list[i].id)) continue
+      all.push(list[i])
+    }
   }
   all.sort(function(a, b) {
     return String(b.createdAt).localeCompare(String(a.createdAt))
