@@ -52,6 +52,19 @@ rm -rf ~/.config/omarchy/social-poster
 omarchy plugin update io.github.polidog.social-poster
 ```
 
+## Running a local checkout
+
+To run your own working tree instead of the installed copy:
+
+```bash
+tools/install-local             # sync into ~/.config/omarchy/plugins/
+tools/install-local --restart   # sync and restart the shell
+```
+
+Omarchy rejects symlinks inside a plugin folder, so this copies rather than
+links. The shell picks most edits up on its own, but hot reload does miss
+changes sometimes — pass `--restart` when the UI does not update.
+
 ## Configuring accounts
 
 ### Setup UI (recommended)

@@ -51,6 +51,19 @@ rm -rf ~/.config/omarchy/social-poster
 omarchy plugin update io.github.polidog.social-poster
 ```
 
+## 手元の作業ツリーで動かす
+
+インストール済みのコピーではなく、自分の作業ツリーを動かす場合:
+
+```bash
+tools/install-local             # ~/.config/omarchy/plugins/ へ同期
+tools/install-local --restart   # 同期してシェルも再起動
+```
+
+Omarchy はプラグインフォルダ内のシンボリックリンクを許さないため、リンクでは
+なくコピーします。たいていの変更はシェルが自分で拾いますが、ホットリロードは
+取りこぼすことがあるので、UI が更新されないときは `--restart` を付けてください。
+
 ## アカウント設定
 
 ### セットアップ UI(推奨)
