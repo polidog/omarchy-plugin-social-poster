@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bluesky (AT Protocol) provider — polidog.social-poster Provider Contract v1
+# Bluesky (AT Protocol) provider — io.github.polidog.social-poster Provider Contract v1
 #
 # 呼び出し: bluesky <info|verify|post|mentions|markRead>
 #   stdin:  JSON リクエスト(contractVersion / account / state / ...)

@@ -17,14 +17,36 @@ Bluesky・Misskey・Mastodon などの SNS に、[Omarchy](https://omarchy.org/)
 ## インストール
 
 ```bash
-omarchy plugin add https://github.com/polidog/omarch-plugin-social-poster
+omarchy plugin add https://github.com/polidog/omarchy-plugin-social-poster
 ```
 
-有効化してバーにウィジェットを追加します:
+有効化してバーの右セクションにウィジェットを追加します:
 
 ```bash
-omarchy plugin enable polidog.social-poster
-omarchy bar add polidog.social-poster --section right
+omarchy plugin enable io.github.polidog.social-poster --section right
+```
+
+## アンインストール
+
+```bash
+# バーから外して無効化
+omarchy plugin disable io.github.polidog.social-poster
+
+# プラグイン本体を削除
+omarchy plugin remove io.github.polidog.social-poster
+```
+
+アカウント設定はプラグインを消しても残ります。認証情報ごと消すには手動で
+削除してください:
+
+```bash
+rm -rf ~/.config/omarchy/social-poster
+```
+
+## 更新
+
+```bash
+omarchy plugin update io.github.polidog.social-poster
 ```
 
 ## アカウント設定
@@ -118,7 +140,7 @@ stdout の値に展開してからプロバイダーへ渡します(展開はメ
 `~/.config/hypr/bindings.lua` に追加します:
 
 ```lua
-o.bind("SUPER SHIFT, P", "exec", "omarchy-shell shell summon polidog.social-poster")
+o.bind("SUPER SHIFT, P", "exec", "omarchy-shell shell summon io.github.polidog.social-poster")
 ```
 
 ## 独自 SNS の追加

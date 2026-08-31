@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Misskey provider — polidog.social-poster Provider Contract v1
+# Misskey provider — io.github.polidog.social-poster Provider Contract v1
 #
 # 呼び出し: misskey <info|verify|post|mentions|markRead>
 #   stdin:  JSON リクエスト、stdout: JSON レスポンス、stderr: 診断ログ

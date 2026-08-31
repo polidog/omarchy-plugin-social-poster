@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mastodon provider — polidog.social-poster Provider Contract v1
+# Mastodon provider — io.github.polidog.social-poster Provider Contract v1
 #
 # Mastodon API 互換サーバー(Pleroma / Akkoma / GoToSocial など)でも動く。
 #

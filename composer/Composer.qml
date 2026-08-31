@@ -5,7 +5,7 @@ import qs.Commons
 import qs.Ui
 
 // 投稿用オーバーレイ(SPEC §6.1)。
-// `omarchy-shell shell summon polidog.social-poster '<payload>'` で開く。
+// `omarchy-shell shell summon io.github.polidog.social-poster '<payload>'` で開く。
 // payload に {"replyTo": {accountId, replyContext, authorHandle, excerpt}}
 // が入っていると返信モードになる(replyContext は不透明値のまま渡す)。
 Item {
@@ -109,7 +109,7 @@ Item {
   function dismiss() {
     opened = false
     if (shell && typeof shell.hide === "function")
-      shell.hide((manifest && manifest.id) || "polidog.social-poster")
+      shell.hide((manifest && manifest.id) || "io.github.polidog.social-poster")
   }
 
   function toggleTarget(id) {

@@ -23,7 +23,7 @@ PopupCard {
   function summonComposer(payload) {
     if (!root.bar || !root.bar.shell) return
     root.close()
-    root.bar.shell.summon("polidog.social-poster", JSON.stringify(payload || {}))
+    root.bar.shell.summon("io.github.polidog.social-poster", JSON.stringify(payload || {}))
   }
 
   Column {

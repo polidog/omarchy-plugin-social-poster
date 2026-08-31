@@ -8,9 +8,9 @@ import qs.Ui
 // 右クリック: コンポーザー召喚。
 BarWidget {
   id: root
-  moduleName: "polidog.social-poster"
+  moduleName: "io.github.polidog.social-poster"
 
-  readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("polidog.social-poster") : null
+  readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("io.github.polidog.social-poster") : null
   readonly property int unread: svc ? svc.unreadCount : 0
   // accountStatus はマップごと再代入されるのでバインディングが追従する
   readonly property bool degraded: svc ? _computeDegraded(svc.accountStatus) : false
@@ -97,7 +97,7 @@ BarWidget {
       if (mouse.button === Qt.MiddleButton) {
         if (root.svc) root.svc.refreshNow()
       } else if (mouse.button === Qt.RightButton) {
-        if (root.bar && root.bar.shell) root.bar.shell.summon("polidog.social-poster", "{}")
+        if (root.bar && root.bar.shell) root.bar.shell.summon("io.github.polidog.social-poster", "{}")
       } else {
         root.popupOpen = !root.popupOpen
       }

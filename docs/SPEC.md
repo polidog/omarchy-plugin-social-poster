@@ -1,8 +1,8 @@
 # Omarchy Social Poster プラグイン 仕様書
 
 - Status: Draft v0.2(2026-08-31)
-- Plugin ID: `polidog.social-poster`
-- Repository: `polidog/omarch-plugin-social-poster`
+- Plugin ID: `io.github.polidog.social-poster`
+- Repository: `polidog/omarchy-plugin-social-poster`
 - v0.2 での変更: SNS 対応をプロバイダー機構として外部化し、利用者が独自 SNS を追加できる設計に変更
 
 ## 1. 概要
@@ -35,7 +35,7 @@ Bluesky・Misskey などの SNS に対して、Omarchy デスクトップから�
 
 | 項目 | 内容 |
 |------|------|
-| 配置場所 | `~/.config/omarchy/plugins/polidog.social-poster/`(git 管理し `omarchy plugin add` で導入) |
+| 配置場所 | `~/.config/omarchy/plugins/io.github.polidog.social-poster/`(git 管理し `omarchy plugin add` で導入) |
 | マニフェスト | `manifest.json`、`schemaVersion: 1`。`id` に `omarchy.*` は使用不可 |
 | kinds | `bar-widget`(バーのピル+ポップアップ)、`overlay`(コンポーザー)、`service`(常駐ポーリング)を使う。kind ごとに `entryPoints.barWidget` / `.overlay` / `.service` が必須 |
 | ネットワーク | QML に fetch は無いため外部プロセス実行(`Process`)経由。本プラグインではプロバイダー実行ファイルがこの層を担う |
@@ -43,14 +43,14 @@ Bluesky・Misskey などの SNS に対して、Omarchy デスクトップから�
 | リロード | `~/.config/omarchy/plugins/` 以下の保存で自動リロード。失敗時は `omarchy-shell shell rescanPlugins` |
 | 検証 | `omarchy plugin validate <folder>`。シンボリックリンク禁止、entryPoint は相対パスで実在必須 |
 | 通知 | `omarchy-notification-send` を利用 |
-| 外部からの呼び出し | `omarchy-shell shell summon polidog.social-poster '<jsonPayload>'` でオーバーレイを召喚できる(キーバインドから投稿画面を開く用途) |
+| 外部からの呼び出し | `omarchy-shell shell summon io.github.polidog.social-poster '<jsonPayload>'` でオーバーレイを召喚できる(キーバインドから投稿画面を開く用途) |
 
 QML から任意のユーザー JS を動的ロードするのは Quickshell 上で安全に行いにくい。そこで拡張点は QML/JS ではなく**実行ファイル + JSON over stdio** に置く。これなら言語自由・プロセス分離・ホットリロード不要(呼び出しごとに最新が使われる)という利点もある。
 
 ## 3. コンポーネント構成
 
 ```
-polidog.social-poster/
+io.github.polidog.social-poster/
 ├── manifest.json
 ├── README.md
 ├── docs/
@@ -76,7 +76,7 @@ polidog.social-poster/
 ```json
 {
   "schemaVersion": 1,
-  "id": "polidog.social-poster",
+  "id": "io.github.polidog.social-poster",
   "name": "Social Poster",
   "version": "0.1.0",
   "author": "polidog",
@@ -272,7 +272,7 @@ esac
 
 ### 6.1 投稿フロー
 
-1. キーバインド(例: `SUPER+SHIFT+P`)→ `omarchy-shell shell summon polidog.social-poster` でコンポーザーが開く
+1. キーバインド(例: `SUPER+SHIFT+P`)→ `omarchy-shell shell summon io.github.polidog.social-poster` でコンポーザーが開く
 2. 投稿先アカウントをチェックボックスで選択(初期値は `defaultPostTargets`。`capabilities` に `post` の無いアカウントは非表示)
 3. テキスト入力。選択中アカウントの `maxChars` の最小値に対する残数を表示
 4. `Ctrl+Enter` で送信、`Esc` でキャンセル
@@ -281,7 +281,7 @@ esac
 キーバインドは README で案内する(`~/.config/hypr/bindings.lua` にユーザー自身が追加):
 
 ```lua
-o.bind("SUPER SHIFT, P", "exec", "omarchy-shell shell summon polidog.social-poster")
+o.bind("SUPER SHIFT, P", "exec", "omarchy-shell shell summon io.github.polidog.social-poster")
 ```
 
 ### 6.2 メンション表示
