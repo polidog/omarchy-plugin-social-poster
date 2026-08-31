@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# install-local — この作業ツリーを ~/.config/omarchy/plugins/ へ入れて動かす
+#
+# 使い方:
+#   tools/install-local              # 同期する(シェルが拾えばホットリロード)
+#   tools/install-local --restart    # 同期してシェルも再起動する
+#
+# Omarchy はプラグインフォルダ内のシンボリックリンクを許さない
+# (omarchy plugin validate が弾く)ため、リンクではなく実体をコピーする。
+# ホットリロードは取りこぼすことがあるので、UI の変更が反映されない
+# ときは --restart を付ける。
+set -euo pipefail
+
+PLUGIN_ID="io.github.polidog.social-poster"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$PLUGIN_ID"
+
+if [[ -L "$DEST" ]]; then
+  echo "install-local: $DEST はシンボリックリンクなので外します" >&2
+  rm "$DEST"
+fi
+
+mkdir -p "$DEST"
+rsync -a --delete \
+  --exclude '.git/' \
+  --exclude 'preview.png' \
+  --exclude 'README.ja.md' \
+  "$SRC/" "$DEST/"
+
+echo "install-local: $SRC -> $DEST"
+
+if command -v omarchy >/dev/null 2>&1; then
+  omarchy plugin validate "$DEST" >/dev/null && echo "install-local: validate ok"
+fi
+
+if [[ "${1:-}" == "--restart" ]]; then
+  omarchy-restart-shell >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    sleep 1
+    if omarchy-shell shell ping 2>/dev/null | grep -q ok; then
+      echo "install-local: シェル再起動 ok"
+      exit 0
+    fi
+  done
+  echo "install-local: シェルが応答しません" >&2
+  exit 1
+fi

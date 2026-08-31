@@ -16,6 +16,7 @@ Item {
   property var service: null  // シェルが同一プラグインの service を注入する
 
   property bool opened: false
+  property bool keyboardHeld: true      // false なら他ウィンドウにキーボードを譲る
   property bool busy: false
   property bool setupMode: false       // true ならアカウント設定画面
   property var replyTo: null           // null なら新規投稿
@@ -23,7 +24,11 @@ Item {
   property var selected: ({})          // accountId -> bool
   property var postErrors: ({})        // accountId -> エラーメッセージ
 
-  readonly property int charCount: Array.from(input.text).length
+  // IME の未確定文字列(preedit)は input.text に入らないので、本文は必ず
+  // これを経由して読む。素の input.text を見ると変換中は「0 文字」になり、
+  // そのまま投稿すると未確定分が落ちる。
+  readonly property string draft: input.text + input.preeditText
+  readonly property int charCount: Array.from(draft).length
   readonly property var charLimit: {
     var limit = null
     for (var i = 0; i < targets.length; i++) {
@@ -40,7 +45,7 @@ Item {
     return n
   }
   readonly property bool canSend: !busy && selectedCount > 0 && !overLimit
-    && input.text.trim().length > 0
+    && draft.trim().length > 0
 
   // オーバーレイは menu サーフェスのトークンを共有(omarchy.emojis と同じ流儀)
   readonly property color background: Color.menu.background
@@ -59,12 +64,14 @@ Item {
     if (payload.setup === true || (service && service.accounts.length === 0 && !payload.replyTo)) {
       setupMode = true
       replyTo = null
+      keyboardHeld = true
       opened = true
       Qt.callLater(function() { contentColumn.forceActiveFocus() })
       return
     }
 
     prepareCompose(payload)
+    keyboardHeld = true
     opened = true
     Qt.callLater(function() { input.forceActiveFocus() })
   }
@@ -75,6 +82,7 @@ Item {
     targets = service ? service.postAccounts.slice() : []
     postErrors = ({})
     busy = false
+    Qt.inputMethod.reset()   // 前回の未確定文字を持ち越さない
     input.text = ""
 
     // 投稿先の初期値: 返信は元アカウント固定、新規は defaultPostTargets(SPEC §6.1)
@@ -119,8 +127,21 @@ Item {
     selected = next
   }
 
+  property bool _committing: false
+
   function send() {
     if (!canSend || !service) return
+
+    // IME 変換中はその未確定分が input.text に入っていない。先に確定させ、
+    // 反映された次のイベントループで送り直す(1 回だけ)。
+    if (input.inputMethodComposing && !_committing) {
+      _committing = true
+      Qt.inputMethod.commit()
+      Qt.callLater(function() { root._committing = false; root.send() })
+      return
+    }
+    _committing = false
+
     var ids = []
     for (var i = 0; i < targets.length; i++)
       if (selected[targets[i].id]) ids.push(targets[i].id)
@@ -142,6 +163,7 @@ Item {
       if (failedCount === 0) {
         // 全成功: 閉じて成功通知(SPEC §6.1)
         service.notify("投稿しました", ids.length > 1 ? ids.length + " アカウントに投稿" : "", false)
+        Qt.inputMethod.reset()
         input.text = ""
         root.dismiss()
       } else {
@@ -167,27 +189,14 @@ Item {
     WlrLayershell.layer: WlrLayer.Overlay
     exclusionMode: ExclusionMode.Ignore
 
-    // キーボードは掴みっぱなしにしない。マップ直後だけ Exclusive にして
-    // 確実にフォーカスを取り(ポインタを掴んだアプリの上でも開けるように)、
-    // すぐ OnDemand へ落として Hyprland のキーバインドと他ウィンドウへの
-    // フォーカス移動を解放する。カードをクリックすれば入力へ戻れる。
-    property bool focusPrimed: false
+    // 開いている間はキーボードを掴む。Hyprland は OnDemand のレイヤー
+    // サーフェスにマップ時のフォーカスを与えないので、途中で OnDemand へ
+    // 降格すると refocus が走ってフォーカスごと奪われ、キーイベントが一切
+    // 届かなくなる(Esc すら効かない)。他のウィンドウで打ちたいときは
+    // Ctrl+Esc / 󰌌 で明示的に手放し、カードをクリックすれば掴み直す。
     WlrLayershell.keyboardFocus: root.opened
-      ? (focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+      ? (root.keyboardHeld ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.OnDemand)
       : WlrKeyboardFocus.None
-
-    onBackingWindowVisibleChanged: {
-      focusPrimed = false
-      if (root.opened && backingWindowVisible) focusPrimeTimer.restart()
-    }
-
-    Timer {
-      id: focusPrimeTimer
-      // Qt/Wayland の commit を数回またぐだけの長さ。Exclusive でいる時間を
-      // 体感できないほど短く保つ。
-      interval: 75
-      onTriggered: if (root.opened) panel.focusPrimed = true
-    }
 
     // クリックを受けるのはカードの矩形だけで、外側はクリックスルー。
     // よって「外側クリックで閉じる」は無くなり、閉じるのは Esc / 󰅖 /
@@ -210,6 +219,18 @@ Item {
       borderSpec: root.borderSpec
       padding: root.contentMargin
 
+      // 手放したキーボードを掴み直す。下の入力欄・ボタンにもイベントを
+      // 通したいので accepted は落とす(この MouseArea は最前面に置く)。
+      MouseArea {
+        anchors.fill: parent
+        z: 1
+        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        onPressed: function(mouse) {
+          root.keyboardHeld = true
+          mouse.accepted = false
+        }
+      }
+
       Column {
         id: contentColumn
         anchors.top: parent.top
@@ -222,6 +243,12 @@ Item {
 
         // フォーカスが入力欄にあっても、未処理の Esc はここまでバブルしてくる
         focus: true
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape && (event.modifiers & Qt.ControlModifier)) {
+            root.keyboardHeld = false
+            event.accepted = true
+          }
+        }
         Keys.onEscapePressed: root.dismiss()
 
         // ---- ヘッダー ----
@@ -248,6 +275,25 @@ Item {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(2)
+
+            Button {
+              iconText: "󰌌"
+              tooltipText: "キーボードを他のウィンドウへ譲る (Ctrl+Esc)"
+              visible: root.keyboardHeld
+              foreground: root.foreground
+              onClicked: root.keyboardHeld = false
+            }
+
+            // 設定画面からは閉じ直さずに新規投稿へ戻れるようにする。
+            // 投稿先が 1 つも無いうちは戻っても書けないので隠す。
+            Button {
+              iconText: "󰤌"
+              tooltipText: "新規投稿"
+              visible: root.setupMode
+                && !!root.service && root.service.postAccounts.length > 0
+              foreground: root.foreground
+              onClicked: root.switchToCompose()
+            }
 
             Button {
               iconText: "󰒓"
@@ -408,7 +454,10 @@ Item {
               onCursorRectangleChanged: inputFlick.ensureVisible(cursorRectangle)
 
               Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Escape) {
+                if (event.key === Qt.Key_Escape && (event.modifiers & Qt.ControlModifier)) {
+                  root.keyboardHeld = false
+                  event.accepted = true
+                } else if (event.key === Qt.Key_Escape) {
                   root.dismiss()
                   event.accepted = true
                 } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
@@ -419,7 +468,7 @@ Item {
               }
 
               Text {
-                visible: input.text.length === 0
+                visible: input.text.length === 0 && input.preeditText.length === 0
                 text: "いまどうしてる?"
                 color: Qt.darker(root.foreground, 1.6)
                 font.family: root.fontFamily

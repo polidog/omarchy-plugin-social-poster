@@ -85,7 +85,7 @@ PopupCard {
         }
 
         Button {
-          iconText: "󰤳"
+          iconText: "󰤌"
           tooltipText: "新規投稿"
           foreground: root.bar.foreground
           onClicked: root.summonComposer({})
