@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Misskey provider — polidog.social-poster Provider Contract v1
+#
+# 呼び出し: misskey <info|verify|post|mentions|markRead>
+#   stdin:  JSON リクエスト、stdout: JSON レスポンス、stderr: 診断ログ
+#
+# account: { host, token, visibility? }
+#   token に必要な権限: write:notes, read:notifications, write:notifications
+# state:   なし(このプロバイダーはステートレス)
+set -euo pipefail
+
+SUB="${1:?subcommand required}"
+REQ="$(cat)"
+
+emit_error() { # code message
+  jq -cn --arg c "$1" --arg m "$2" '{ok:false,error:{code:$c,message:$m}}'
+  exit 0
+}
+
+command -v jq >/dev/null 2>&1 || { printf '%s\n' '{"ok":false,"error":{"code":"other","message":"jq is not installed"}}'; exit 0; }
+command -v curl >/dev/null 2>&1 || emit_error other "curl is not installed"
+
+jq -e . >/dev/null 2>&1 <<<"$REQ" || emit_error invalid "request is not valid JSON"
+
+HOST="$(jq -r '.account.host // empty' <<<"$REQ")"
+HOST="${HOST%/}"
+TOKEN="$(jq -r '.account.token // empty' <<<"$REQ")"
+VISIBILITY="$(jq -r '.account.visibility // "public"' <<<"$REQ")"
+
+require_host() {
+  [[ "$HOST" == https://* ]] || emit_error invalid "account.host には https:// で始まる URL を指定してください"
+}
+
+HTTP_CODE=""
+BODY=""
+
+# Misskey API はトークンをボディの i フィールドで渡す。秘密を含むため
+# ボディは必ず stdin(--data @-)経由で curl に渡す(argv に載せない)。
+api() { # path json-body
+  local path="$1" body="$2" out
+  out=$(curl -sS --proto '=https' --max-time 25 -X POST \
+    -H 'Content-Type: application/json' --data @- -w $'\n%{http_code}' \
+    "$HOST/api/$path" <<<"$body") || return 1
+  HTTP_CODE="${out##*$'\n'}"
+  BODY="${out%$'\n'*}"
+  [[ "$out" == *$'\n'* ]] || { HTTP_CODE="$out"; BODY=""; }
+}
+
+with_token() { # json-object
+  [[ -n "$TOKEN" ]] || emit_error auth "account.token が accounts.json にありません"
+  jq -c --arg i "$TOKEN" '. + {i:$i}' <<<"$1"
+}
+
+api_message() {
+  jq -r '.error.message // .error.code // "unknown error"' <<<"$BODY" 2>/dev/null || printf 'unknown error'
+}
+
+# 認証付き呼び出し + エラー分類
+authed() { # path json-object(トークンなし)
+  require_host
+  api "$1" "$(with_token "$2")" || emit_error network "cannot reach $HOST"
+  case "$HTTP_CODE" in
+    2*) ;;
+    401 | 403) emit_error auth "HTTP $HTTP_CODE: $(api_message)" ;;
+    *) emit_error other "HTTP $HTTP_CODE: $(api_message)" ;;
+  esac
+}
+
+case "$SUB" in
+  info)
+    # maxChars はインスタンス依存(/api/meta)。取得失敗時は 3000(SPEC §4.6)
+    MAX_CHARS=3000
+    if [[ "$HOST" == https://* ]] && api meta '{"detail":false}' && [[ "$HTTP_CODE" == 2* ]]; then
+      META_MAX="$(jq -r '.maxNoteTextLength // empty' <<<"$BODY" 2>/dev/null || true)"
+      [[ "$META_MAX" =~ ^[0-9]+$ ]] && MAX_CHARS="$META_MAX"
+    else
+      echo "misskey: /api/meta unavailable, falling back to maxChars=3000" >&2
+    fi
+    jq -cn --argjson m "$MAX_CHARS" \
+      '{ok:true,name:"Misskey",maxChars:$m,capabilities:["post","mentions","markRead"]}'
+    ;;
+
+  verify)
+    authed i '{}'
+    jq -cn '{ok:true}'
+    ;;
+
+  post)
+    TEXT="$(jq -r '.text // empty' <<<"$REQ")"
+    [[ -n "$TEXT" ]] || emit_error invalid "text is required"
+    REPLY_ID="$(jq -r '.replyTo.noteId // empty' <<<"$REQ")"
+    NOTE=$(jq -cn --arg t "$TEXT" --arg v "$VISIBILITY" --arg r "$REPLY_ID" '
+      {text:$t, visibility:$v} + (if $r != "" then {replyId:$r} else {} end)')
+    authed notes/create "$NOTE"
+    NOTE_ID="$(jq -r '.createdNote.id // empty' <<<"$BODY")"
+    if [[ -n "$NOTE_ID" ]]; then
+      jq -cn --arg u "$HOST/notes/$NOTE_ID" '{ok:true,url:$u}'
+    else
+      jq -cn '{ok:true,url:null}'
+    fi
+    ;;
+
+  mentions)
+    authed i/notifications '{"limit":50,"includeTypes":["mention","reply"]}'
+    MENTIONS=$(jq -c --arg host "$HOST" '[.[]?
+      | select(.note != null)
+      | {
+          id: .id,
+          author: {
+            handle: ("@" + (.user.username // "unknown")
+                     + (if .user.host then "@" + .user.host else "" end)),
+            displayName: (.user.name // .user.username // ""),
+            avatarUrl: (.user.avatarUrl // null)
+          },
+          text: (.note.text // .note.cw // ""),
+          createdAt: (.createdAt // ""),
+          url: ($host + "/notes/" + .note.id),
+          replyContext: {noteId: .note.id}
+        }]' <<<"$BODY") || emit_error other "unexpected notifications response"
+    jq -cn --argjson m "$MENTIONS" '{ok:true,mentions:$m,cursor:null}'
+    ;;
+
+  markRead)
+    # 個別既読は未対応のため全既読(SPEC §4.6)。until は使用しない。
+    authed notifications/mark-all-as-read '{}'
+    jq -cn '{ok:true}'
+    ;;
+
+  *)
+    emit_error invalid "unsupported subcommand: $SUB"
+    ;;
+esac

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# Bluesky (AT Protocol) provider — polidog.social-poster Provider Contract v1
+#
+# 呼び出し: bluesky <info|verify|post|mentions|markRead>
+#   stdin:  JSON リクエスト(contractVersion / account / state / ...)
+#   stdout: JSON レスポンス
+#   stderr: 診断ログ(コアがリングバッファに保持)
+#
+# account: { service?, identifier, appPassword }
+# state:   { accessJwt, refreshJwt, did }(このプロバイダーが管理)
+set -euo pipefail
+
+SUB="${1:?subcommand required}"
+REQ="$(cat)"
+
+emit_error() { # code message
+  jq -cn --arg c "$1" --arg m "$2" '{ok:false,error:{code:$c,message:$m}}'
+  exit 0
+}
+
+command -v jq >/dev/null 2>&1 || { printf '%s\n' '{"ok":false,"error":{"code":"other","message":"jq is not installed"}}'; exit 0; }
+command -v curl >/dev/null 2>&1 || emit_error other "curl is not installed"
+
+jq -e . >/dev/null 2>&1 <<<"$REQ" || emit_error invalid "request is not valid JSON"
+
+SERVICE="$(jq -r '.account.service // "https://bsky.social"' <<<"$REQ")"
+SERVICE="${SERVICE%/}"
+IDENTIFIER="$(jq -r '.account.identifier // empty' <<<"$REQ")"
+APP_PASSWORD="$(jq -r '.account.appPassword // empty' <<<"$REQ")"
+ACCESS="$(jq -r '.state.accessJwt // empty' <<<"$REQ")"
+REFRESH="$(jq -r '.state.refreshJwt // empty' <<<"$REQ")"
+DID="$(jq -r '.state.did // empty' <<<"$REQ")"
+
+HTTP_CODE=""
+BODY=""
+
+# レスポンス本文と HTTP コードをメモリ上で受ける(一時ファイルに秘密を書かない)
+split_out() { # curl 出力("body\ncode")
+  HTTP_CODE="${1##*$'\n'}"
+  BODY="${1%$'\n'*}"
+  [[ "$1" == *$'\n'* ]] || { HTTP_CODE="$1"; BODY=""; }
+}
+
+# 認証付き呼び出し。トークンは argv に載せず stdin(-H @-)で渡す。
+xrpc_auth() { # method path token [json-body]
+  local method="$1" path="$2" token="$3" body="${4:-}" out
+  local args=(-sS --proto '=https' --max-time 25 -X "$method"
+    -H 'Content-Type: application/json' -H @- -w $'\n%{http_code}'
+    "$SERVICE/xrpc/$path")
+  [[ -n "$body" ]] && args+=(-d "$body")
+  out=$(curl "${args[@]}" <<<"Authorization: Bearer $token") || return 1
+  split_out "$out"
+}
+
+# 秘密を含むボディは stdin(--data @-)で渡す(createSession 用)
+xrpc_secret_body() { # path json-body
+  local path="$1" body="$2" out
+  out=$(curl -sS --proto '=https' --max-time 25 -X POST \
+    -H 'Content-Type: application/json' --data @- -w $'\n%{http_code}' \
+    "$SERVICE/xrpc/$path" <<<"$body") || return 1
+  split_out "$out"
+}
+
+api_message() {
+  jq -r '.message // .error // "unknown error"' <<<"$BODY" 2>/dev/null || printf 'unknown error'
+}
+
+take_session() {
+  ACCESS="$(jq -r '.accessJwt // empty' <<<"$BODY")"
+  REFRESH="$(jq -r '.refreshJwt // empty' <<<"$BODY")"
+  DID="$(jq -r '.did // empty' <<<"$BODY")"
+  [[ -n "$ACCESS" && -n "$DID" ]]
+}
+
+create_session() {
+  [[ -n "$IDENTIFIER" && -n "$APP_PASSWORD" ]] \
+    || emit_error auth "identifier / appPassword が accounts.json にありません"
+  local body
+  body=$(jq -cn --arg i "$IDENTIFIER" --arg p "$APP_PASSWORD" '{identifier:$i,password:$p}')
+  xrpc_secret_body com.atproto.server.createSession "$body" \
+    || emit_error network "cannot reach $SERVICE"
+  [[ "$HTTP_CODE" == 200 ]] || emit_error auth "login failed (HTTP $HTTP_CODE): $(api_message)"
+  take_session || emit_error other "createSession returned no tokens"
+  echo "bluesky: created new session for $IDENTIFIER" >&2
+}
+
+refresh_session() {
+  [[ -n "$REFRESH" ]] || return 1
+  xrpc_auth POST com.atproto.server.refreshSession "$REFRESH" || return 1
+  [[ "$HTTP_CODE" == 200 ]] || return 1
+  take_session || return 1
+  echo "bluesky: refreshed session" >&2
+}
+
+ensure_session() {
+  [[ -n "$ACCESS" && -n "$DID" ]] && return 0
+  refresh_session || create_session
+}
+
+token_expired() {
+  [[ "$HTTP_CODE" == 400 || "$HTTP_CODE" == 401 ]] \
+    && jq -e '.error? | test("ExpiredToken|InvalidToken|AuthenticationRequired")' >/dev/null 2>&1 <<<"$BODY"
+}
+
+# 認証付き呼び出し + トークン失効時の自動回復(refresh → 再ログイン)
+authed() { # method path [json-body]
+  local method="$1" path="$2" body="${3:-}"
+  ensure_session
+  xrpc_auth "$method" "$path" "$ACCESS" "$body" || emit_error network "cannot reach $SERVICE"
+  if token_expired; then
+    refresh_session || create_session
+    xrpc_auth "$method" "$path" "$ACCESS" "$body" || emit_error network "cannot reach $SERVICE"
+  fi
+  case "$HTTP_CODE" in
+    2*) ;;
+    401 | 403) emit_error auth "HTTP $HTTP_CODE: $(api_message)" ;;
+    *) emit_error other "HTTP $HTTP_CODE: $(api_message)" ;;
+  esac
+}
+
+emit_ok() { # [extra-json-object]
+  jq -cn --argjson extra "${1:-{\}}" \
+    --arg a "$ACCESS" --arg r "$REFRESH" --arg d "$DID" \
+    '{ok:true,state:{accessJwt:$a,refreshJwt:$r,did:$d}} + $extra'
+}
+
+case "$SUB" in
+  info)
+    jq -cn '{ok:true,name:"Bluesky",maxChars:300,capabilities:["post","mentions","markRead"]}'
+    ;;
+
+  verify)
+    authed GET com.atproto.server.getSession
+    emit_ok
+    ;;
+
+  post)
+    TEXT="$(jq -r '.text // empty' <<<"$REQ")"
+    [[ -n "$TEXT" ]] || emit_error invalid "text is required"
+    REPLY="$(jq -c '.replyTo // null' <<<"$REQ")"
+    NOW="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+    RECORD=$(jq -cn --arg t "$TEXT" --arg now "$NOW" --argjson reply "$REPLY" '
+      {"$type":"app.bsky.feed.post", text:$t, createdAt:$now}
+      + (if ($reply != null and $reply.uri != null) then
+          {reply:{parent:{uri:$reply.uri, cid:$reply.cid},
+                  root:{uri:($reply.rootUri // $reply.uri), cid:($reply.rootCid // $reply.cid)}}}
+        else {} end)')
+    ensure_session
+    POST_BODY=$(jq -cn --arg repo "$DID" --argjson rec "$RECORD" \
+      '{repo:$repo, collection:"app.bsky.feed.post", record:$rec}')
+    authed POST com.atproto.repo.createRecord "$POST_BODY"
+    URI="$(jq -r '.uri // empty' <<<"$BODY")"
+    if [[ -n "$URI" ]]; then
+      emit_ok "$(jq -cn --arg d "$DID" --arg rkey "${URI##*/}" '{url:("https://bsky.app/profile/" + $d + "/post/" + $rkey)}')"
+    else
+      emit_ok '{"url":null}'
+    fi
+    ;;
+
+  mentions)
+    authed GET "app.bsky.notification.listNotifications?limit=50"
+    MENTIONS=$(jq -c '[.notifications[]?
+      | select(.reason == "mention" or .reason == "reply")
+      | {
+          id: .uri,
+          author: {
+            handle: ("@" + (.author.handle // "unknown")),
+            displayName: (.author.displayName // .author.handle // ""),
+            avatarUrl: (.author.avatar // null)
+          },
+          text: (.record.text // ""),
+          createdAt: (.indexedAt // .record.createdAt // ""),
+          url: ("https://bsky.app/profile/" + (.author.handle // .author.did // "") + "/post/" + (.uri | split("/") | last)),
+          replyContext: {
+            uri: .uri,
+            cid: .cid,
+            rootUri: (.record.reply.root.uri // .uri),
+            rootCid: (.record.reply.root.cid // .cid)
+          }
+        }]' <<<"$BODY") || emit_error other "unexpected listNotifications response"
+    emit_ok "$(jq -cn --argjson m "$MENTIONS" '{mentions:$m, cursor:null}')"
+    ;;
+
+  markRead)
+    UNTIL="$(jq -r '.until // empty' <<<"$REQ")"
+    [[ -n "$UNTIL" ]] || UNTIL="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+    authed POST app.bsky.notification.updateSeen "$(jq -cn --arg s "$UNTIL" '{seenAt:$s}')"
+    emit_ok
+    ;;
+
+  *)
+    emit_error invalid "unsupported subcommand: $SUB"
+    ;;
+esac

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "polidog.social-poster",
+  "name": "Social Poster",
+  "version": "0.1.0",
+  "author": "polidog",
+  "license": "MIT",
+  "description": "Post to social networks and watch mentions from the bar",
+  "kinds": ["service", "bar-widget", "overlay"],
+  "entryPoints": {
+    "service": "service/Service.qml",
+    "barWidget": "bar/BarWidget.qml",
+    "overlay": "composer/Composer.qml"
+  },
+  "barWidget": {
+    "displayName": "Social",
+    "description": "SNS mentions and quick post",
+    "category": "Social",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

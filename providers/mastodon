@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Mastodon provider — polidog.social-poster Provider Contract v1
+#
+# Mastodon API 互換サーバー(Pleroma / Akkoma / GoToSocial など)でも動く。
+#
+# 呼び出し: mastodon <info|verify|post|mentions|markRead>
+#   stdin:  JSON リクエスト、stdout: JSON レスポンス、stderr: 診断ログ
+#
+# account: { host, token, visibility? }
+#   token は Web UI の「設定 → 開発 → 新規アプリ」で発行したアクセストークン。
+#   必要スコープ: read:accounts, read:notifications, write:statuses, write:accounts
+#   visibility: public / unlisted / private(既定 public)
+# state:   { lastNotificationId }(markRead のマーカー更新に使う)
+set -euo pipefail
+
+SUB="${1:?subcommand required}"
+REQ="$(cat)"
+
+emit_error() { # code message
+  jq -cn --arg c "$1" --arg m "$2" '{ok:false,error:{code:$c,message:$m}}'
+  exit 0
+}
+
+command -v jq >/dev/null 2>&1 || { printf '%s\n' '{"ok":false,"error":{"code":"other","message":"jq is not installed"}}'; exit 0; }
+command -v curl >/dev/null 2>&1 || emit_error other "curl is not installed"
+
+jq -e . >/dev/null 2>&1 <<<"$REQ" || emit_error invalid "request is not valid JSON"
+
+HOST="$(jq -r '.account.host // empty' <<<"$REQ")"
+HOST="${HOST%/}"
+TOKEN="$(jq -r '.account.token // empty' <<<"$REQ")"
+VISIBILITY="$(jq -r '.account.visibility // "public"' <<<"$REQ")"
+LAST_NOTIFICATION_ID="$(jq -r '.state.lastNotificationId // empty' <<<"$REQ")"
+
+require_host() {
+  [[ "$HOST" == https://* ]] || emit_error invalid "account.host には https:// で始まる URL を指定してください"
+}
+
+HTTP_CODE=""
+BODY=""
+
+# トークンは argv に載せず stdin(-H @-)でヘッダーとして渡す。
+# --globoff は types[] のような角括弧付きクエリを素通しするため。
+api() { # method path [json-body]
+  local method="$1" path="$2" body="${3:-}" out
+  local args=(-sS --proto '=https' --globoff --max-time 25 -X "$method"
+    -H 'Content-Type: application/json' -H @- -w $'\n%{http_code}'
+    "$HOST$path")
+  [[ -n "$body" ]] && args+=(-d "$body")
+  out=$(curl "${args[@]}" <<<"Authorization: Bearer $TOKEN") || return 1
+  HTTP_CODE="${out##*$'\n'}"
+  BODY="${out%$'\n'*}"
+  [[ "$out" == *$'\n'* ]] || { HTTP_CODE="$out"; BODY=""; }
+}
+
+api_message() {
+  jq -r '.error // "unknown error"' <<<"$BODY" 2>/dev/null || printf 'unknown error'
+}
+
+authed() { # method path [json-body]
+  require_host
+  [[ -n "$TOKEN" ]] || emit_error auth "account.token が accounts.json にありません"
+  api "$1" "$2" "${3:-}" || emit_error network "cannot reach $HOST"
+  case "$HTTP_CODE" in
+    2*) ;;
+    401 | 403) emit_error auth "HTTP $HTTP_CODE: $(api_message)" ;;
+    *) emit_error other "HTTP $HTTP_CODE: $(api_message)" ;;
+  esac
+}
+
+emit_ok() { # [extra-json-object]
+  jq -cn --argjson extra "${1:-{\}}" --arg last "$LAST_NOTIFICATION_ID" \
+    '{ok:true} + (if $last != "" then {state:{lastNotificationId:$last}} else {} end) + $extra'
+}
+
+case "$SUB" in
+  info)
+    # 文字数上限はインスタンス依存。取得失敗時は Mastodon 既定の 500
+    MAX_CHARS=500
+    if [[ "$HOST" == https://* ]] && api GET /api/v1/instance && [[ "$HTTP_CODE" == 2* ]]; then
+      META_MAX="$(jq -r '.configuration.statuses.max_characters // .max_toot_chars // empty' <<<"$BODY" 2>/dev/null || true)"
+      [[ "$META_MAX" =~ ^[0-9]+$ ]] && MAX_CHARS="$META_MAX"
+    else
+      echo "mastodon: /api/v1/instance unavailable, falling back to maxChars=500" >&2
+    fi
+    jq -cn --argjson m "$MAX_CHARS" \
+      '{ok:true,name:"Mastodon",maxChars:$m,capabilities:["post","mentions","markRead"]}'
+    ;;
+
+  verify)
+    authed GET /api/v1/accounts/verify_credentials
+    emit_ok
+    ;;
+
+  post)
+    TEXT="$(jq -r '.text // empty' <<<"$REQ")"
+    [[ -n "$TEXT" ]] || emit_error invalid "text is required"
+    REPLY_ID="$(jq -r '.replyTo.statusId // empty' <<<"$REQ")"
+    STATUS=$(jq -cn --arg t "$TEXT" --arg v "$VISIBILITY" --arg r "$REPLY_ID" '
+      {status:$t, visibility:$v} + (if $r != "" then {in_reply_to_id:$r} else {} end)')
+    authed POST /api/v1/statuses "$STATUS"
+    URL="$(jq -r '.url // .uri // empty' <<<"$BODY")"
+    if [[ -n "$URL" ]]; then
+      emit_ok "$(jq -cn --arg u "$URL" '{url:$u}')"
+    else
+      emit_ok '{"url":null}'
+    fi
+    ;;
+
+  mentions)
+    # Mastodon では返信も mention 通知として届く
+    authed GET '/api/v1/notifications?types[]=mention&limit=50'
+    MENTIONS=$(jq -c '[.[]?
+      | select(.type == "mention" and .status != null)
+      | {
+          id: .id,
+          author: {
+            handle: ("@" + (.account.acct // .account.username // "unknown")),
+            displayName: (.account.display_name // .account.username // ""),
+            avatarUrl: (.account.avatar // null)
+          },
+          text: ((.status.content // "")
+            | gsub("<br */?>"; "\n") | gsub("</p> *<p>"; "\n\n") | gsub("<[^>]*>"; "")
+            | gsub("&amp;"; "&") | gsub("&lt;"; "<") | gsub("&gt;"; ">")
+            | gsub("&quot;"; "\"") | gsub("&#39;"; "'\''")),
+          createdAt: (.created_at // ""),
+          url: (.status.url // .status.uri // null),
+          replyContext: {statusId: .status.id}
+        }]' <<<"$BODY") || emit_error other "unexpected notifications response"
+    # 先頭が最新。markRead のマーカー更新用に覚えておく
+    NEWEST="$(jq -r '.[0].id // empty' <<<"$BODY")"
+    [[ -n "$NEWEST" ]] && LAST_NOTIFICATION_ID="$NEWEST"
+    emit_ok "$(jq -cn --argjson m "$MENTIONS" '{mentions:$m, cursor:null}')"
+    ;;
+
+  markRead)
+    # Mastodon の既読は時刻ではなく通知 ID のマーカー。mentions で覚えた
+    # 最新 ID まで既読にする(まだ無ければ何もしない)
+    if [[ -n "$LAST_NOTIFICATION_ID" ]]; then
+      authed POST /api/v1/markers \
+        "$(jq -cn --arg id "$LAST_NOTIFICATION_ID" '{notifications:{last_read_id:$id}}')"
+    fi
+    emit_ok
+    ;;
+
+  *)
+    emit_error invalid "unsupported subcommand: $SUB"
+    ;;
+esac

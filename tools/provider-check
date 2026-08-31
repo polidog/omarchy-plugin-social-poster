@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# provider-check — Provider Contract v1 への準拠を確認する簡易テスト
+#
+# 使い方:
+#   tools/provider-check <provider-path>                    # 認証不要のチェックのみ
+#   tools/provider-check <provider-path> --account <file>   # 実アカウントで verify/mentions も確認
+#
+# --account の <file> には accounts.json の 1 エントリ(1 アカウント分の
+# JSON オブジェクト)を入れる。post は投稿が実際に飛ぶため実行しない。
+set -uo pipefail
+
+PROVIDER="${1:-}"
+ACCOUNT_FILE=""
+if [[ "${2:-}" == "--account" ]]; then
+  ACCOUNT_FILE="${3:?--account requires a file}"
+fi
+
+if [[ -z "$PROVIDER" ]]; then
+  echo "usage: provider-check <provider-path> [--account <account.json>]" >&2
+  exit 2
+fi
+
+command -v jq >/dev/null 2>&1 || { echo "provider-check には jq が必要です" >&2; exit 2; }
+
+PASS=0
+FAIL=0
+
+ok()   { echo "  ✔ $1"; PASS=$((PASS + 1)); }
+bad()  { echo "  ✘ $1"; FAIL=$((FAIL + 1)); }
+
+ACCOUNT="{}"
+if [[ -n "$ACCOUNT_FILE" ]]; then
+  ACCOUNT="$(cat "$ACCOUNT_FILE")"
+  jq -e . >/dev/null 2>&1 <<<"$ACCOUNT" || { echo "--account のファイルが JSON ではありません" >&2; exit 2; }
+fi
+
+request() { # 追加フィールドの JSON オブジェクト
+  jq -cn --argjson account "$ACCOUNT" --argjson extra "${1:-{\}}" \
+    '{contractVersion:1, account:$account, state:{}} + $extra'
+}
+
+invoke() { # subcommand [extra-json]
+  request "${2:-{\}}" | timeout 30 "$PROVIDER" "$1" 2>/dev/null
+}
+
+echo "provider-check: $PROVIDER"
+
+# ---- 実行ファイルとしての体裁 ----
+echo "[基本]"
+if [[ -f "$PROVIDER" && -x "$PROVIDER" ]]; then
+  ok "実行可能ファイルである"
+else
+  bad "実行可能ファイルではない(chmod +x を確認)"
+  echo; echo "PASS=$PASS FAIL=$FAIL"; exit 1
+fi
+
+# ---- info ----
+echo "[info]"
+INFO="$(invoke info)"
+if jq -e . >/dev/null 2>&1 <<<"$INFO"; then
+  ok "stdout が JSON である"
+else
+  bad "stdout が JSON ではない: $(head -c 200 <<<"$INFO")"
+  INFO="{}"
+fi
+jq -e '.ok == true' >/dev/null 2>&1 <<<"$INFO" \
+  && ok "ok: true" || bad "ok: true ではない"
+jq -e '.name | type == "string" and length > 0' >/dev/null 2>&1 <<<"$INFO" \
+  && ok "name が文字列" || bad "name がない・文字列でない"
+jq -e '(.maxChars | type == "number" or type == "null")' >/dev/null 2>&1 <<<"$INFO" \
+  && ok "maxChars が number か null" || bad "maxChars が number でも null でもない"
+jq -e '.capabilities | type == "array"' >/dev/null 2>&1 <<<"$INFO" \
+  && ok "capabilities が配列" || bad "capabilities が配列でない"
+jq -e '.capabilities - ["post","mentions","markRead"] | length == 0' >/dev/null 2>&1 <<<"$INFO" \
+  && ok "capabilities が既知の値のみ" || bad "capabilities に未知の値が含まれる"
+
+CAPS="$(jq -c '.capabilities // []' <<<"$INFO")"
+
+# ---- 未知サブコマンド ----
+echo "[未知サブコマンド]"
+UNKNOWN="$(invoke __no_such_subcommand__)"
+if jq -e '.ok == false and .error.code and (.error.message | type == "string")' >/dev/null 2>&1 <<<"$UNKNOWN"; then
+  ok 'ok:false + error{code,message} を返す'
+else
+  bad "未知サブコマンドで整形されたエラーを返さない: $(head -c 200 <<<"$UNKNOWN")"
+fi
+
+# ---- 空の stdin(壊れたリクエスト)----
+echo "[不正リクエスト]"
+BROKEN="$(printf 'not-json' | timeout 30 "$PROVIDER" info 2>/dev/null)"
+if jq -e '.ok == true or .ok == false' >/dev/null 2>&1 <<<"$BROKEN"; then
+  ok "JSON でない stdin でも JSON を返す"
+else
+  bad "JSON でない stdin で JSON 以外を出力した: $(head -c 200 <<<"$BROKEN")"
+fi
+
+# ---- 実アカウントでの確認(任意)----
+if [[ -n "$ACCOUNT_FILE" ]]; then
+  echo "[verify(実アカウント)]"
+  VERIFY="$(invoke verify)"
+  jq -e '.ok == true' >/dev/null 2>&1 <<<"$VERIFY" \
+    && ok "verify が成功" \
+    || bad "verify が失敗: $(jq -c '.error // empty' <<<"$VERIFY" 2>/dev/null)"
+
+  if jq -e 'index("mentions")' >/dev/null 2>&1 <<<"$CAPS"; then
+    echo "[mentions(実アカウント)]"
+    MENTIONS="$(invoke mentions '{"cursor":null}')"
+    if jq -e '.ok == true and (.mentions | type == "array")' >/dev/null 2>&1 <<<"$MENTIONS"; then
+      ok "mentions が配列を返す"
+      if jq -e '[.mentions[] | select((.id | type != "string") or (.author | type != "object") or (.createdAt | type != "string"))] | length == 0' >/dev/null 2>&1 <<<"$MENTIONS"; then
+        ok "各 Mention が必須フィールドを持つ(id/author/createdAt)"
+      else
+        bad "必須フィールドを欠く Mention がある"
+      fi
+    else
+      bad "mentions が失敗: $(jq -c '.error // empty' <<<"$MENTIONS" 2>/dev/null)"
+    fi
+  fi
+else
+  echo "(--account 未指定のため verify/mentions の実通信チェックはスキップ)"
+fi
+
+echo
+echo "PASS=$PASS FAIL=$FAIL"
+[[ "$FAIL" -eq 0 ]]
