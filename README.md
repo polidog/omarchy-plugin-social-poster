@@ -233,22 +233,32 @@ automatically once you fix and save accounts.json.
 
 ### An input method (fcitx5 / ibus) does not reach the composer
 
-If your IME is dead in the composer — keystrokes vanish, no preedit, no
-candidate window — the cause is `QT_IM_MODULE`, not this plugin. Omarchy ships
-`QT_IM_MODULE=fcitx` (`/usr/share/omarchy/default/environment.d/10-omarchy-fcitx.conf`),
-which routes Qt through the fcitx D-Bus input context instead of the Wayland
-`text-input-v3` protocol. Quickshell layer surfaces get no input context that
-way, so every Quickshell overlay is affected, not just this one.
+If your IME misbehaves in the composer — keystrokes vanish, or the candidate
+window flashes once and then the field stops accepting input — the cause is
+`QT_IM_MODULE`, not this plugin. Omarchy ships `QT_IM_MODULE=fcitx`
+(`/usr/share/omarchy/default/environment.d/10-omarchy-fcitx.conf`), which routes
+Qt through the fcitx D-Bus input context instead of the Wayland `text-input-v3`
+protocol. Quickshell layer surfaces get no working input context that way, so
+every Quickshell overlay is affected, not just this one.
 
 Override it for your user and log back in:
 
 ```bash
-# environment.d cannot unset a variable, so override it with an empty value
-printf 'QT_IM_MODULE=\n' > ~/.config/environment.d/95-qt-im-wayland.conf
+printf 'QT_IM_MODULE=wayland\n' > ~/.config/environment.d/95-qt-im-wayland.conf
 ```
 
-Qt then falls back to `text-input-v3`, which fcitx5 and ibus both speak. Delete
-the file and log back in to revert.
+Use `wayland`, not an empty value. systemd's environment.d generator rejects an
+empty assignment (`QT_IM_MODULE=`, and the quoted forms too) as `invalid syntax`
+and silently keeps Omarchy's `fcitx`, so the override does nothing. qtwayland
+special-cases `wayland` and builds the Wayland input context — the same path an
+unset variable takes, and one both fcitx5 and ibus speak. Verify after logging
+back in:
+
+```bash
+systemctl --user show-environment | grep QT_IM_MODULE   # QT_IM_MODULE=wayland
+```
+
+Delete the file and log back in to revert.
 
 ## License
 
