@@ -228,23 +228,31 @@ omarchy-shell social-poster refresh
 
 ### コンポーザーで日本語入力(fcitx5 / ibus)が効かない
 
-コンポーザーで IME が死んでいる — キーが消える、未確定文字列も変換候補も出ない —
-場合、原因はこのプラグインではなく `QT_IM_MODULE` です。Omarchy は既定で
-`QT_IM_MODULE=fcitx` を設定しており
+コンポーザーで IME がおかしい — キーが消える、あるいは変換候補が一瞬だけ出て、その後
+入力を受け付けなくなる — 場合、原因はこのプラグインではなく `QT_IM_MODULE` です。
+Omarchy は既定で `QT_IM_MODULE=fcitx` を設定しており
 (`/usr/share/omarchy/default/environment.d/10-omarchy-fcitx.conf`)、これにより Qt は
 Wayland の `text-input-v3` ではなく fcitx の D-Bus インプットコンテキストを使います。
-この経路では Quickshell のレイヤーサーフェスにインプットコンテキストが付かないため、
-このプラグインに限らず Quickshell のオーバーレイ全体が影響を受けます。
+この経路では Quickshell のレイヤーサーフェスにまともなインプットコンテキストが付かない
+ため、このプラグインに限らず Quickshell のオーバーレイ全体が影響を受けます。
 
 ユーザー側で上書きして再ログインしてください:
 
 ```bash
-# environment.d は unset ができないので、空値で上書きする
-printf 'QT_IM_MODULE=\n' > ~/.config/environment.d/95-qt-im-wayland.conf
+printf 'QT_IM_MODULE=wayland\n' > ~/.config/environment.d/95-qt-im-wayland.conf
 ```
 
-Qt が `text-input-v3` にフォールバックし、fcitx5 も ibus もこれを話せます。元に
-戻すにはこのファイルを削除して再ログインします。
+値は空ではなく `wayland` です。systemd の environment.d ジェネレーターは空代入
+(`QT_IM_MODULE=`、`""` や `''` も同様)を `invalid syntax` として捨てるので、空値では
+Omarchy の `fcitx` が残ったままになり上書きが効きません。qtwayland は `wayland` を
+特別扱いして Wayland のインプットコンテキストを組み立てます — 未設定のときと同じ経路で、
+fcitx5 も ibus もこれを話せます。再ログイン後に確認できます:
+
+```bash
+systemctl --user show-environment | grep QT_IM_MODULE   # QT_IM_MODULE=wayland
+```
+
+元に戻すにはこのファイルを削除して再ログインします。
 
 ## ライセンス
 
